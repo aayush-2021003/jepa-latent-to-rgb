@@ -1,0 +1,105 @@
+cosmos_model_id: "nvidia/Cosmos-Predict2.5-2B"
+cosmos_revision: "diffusers/base/post-trained"
+cosmos_vae_subfolder: "vae"
+# Tiling is unnecessary at 384x384; slicing only helps when VAE batch size is above one.
+cosmos_vae_enable_tiling: false
+cosmos_vae_enable_slicing: false
+
+decoder_dim: 512
+decoder_depth: 4
+decoder_kernel_size: 3
+dropout: 0.0
+
+learning_rate: 2.0e-4
+weight_decay: 0.01
+grad_clip: 1.0
+scheduler_warmup_steps: 200
+
+loss:
+  # Keep latent reconstruction dominant while directly supervising the decoded
+  # video's colors, edges, motion changes, and perceptual appearance.
+  latent_l1_weight: 0.1
+  latent_mse_weight: 1.0
+  rgb_l1_weight: 0.2
+  spatial_gradient_weight: 0.05
+  temporal_difference_weight: 0.05
+  lpips_weight: 0.05
+  lpips_net: "alex"
+  # Four evenly spaced frames keep LPIPS useful without evaluating all 16 frames.
+  lpips_max_frames: 4
+  charbonnier_eps: 1.0e-3
+  decoded_loss_every_n_steps: 1
+
+memory:
+  # The Cosmos VAE stays frozen, but its decoder must remain differentiable so
+  # pixel/perceptual gradients reach the Stage-1 decoder.
+  vae_gradient_checkpointing: true
+
+overfit:
+  enabled: false
+  num_training_steps: 1000
+  fixed_mask_seed: 1
+  latent_mse_only: true
+  scheduler_warmup_steps: 0
+
+indexed_split:
+  enabled: false
+  tar_index: 0
+  source_num_samples: 1000
+  validation_every_nth: 50
+  one_based_nth: true
+  num_training_steps: 14000
+  max_tar_files: 1
+
+random_split:
+  enabled: true
+  # Durable shared manifest: Stage-1 creates it once; Stage-2 must reuse its exact hash.
+  manifest_path: "data/splits/walkindia_first3_seed42.json"
+  seed: 42
+  max_tar_files: 3
+  source_num_samples: 3000
+  test_fraction: 0.10
+  validation_num_samples: 50
+  num_training_steps: 14000
+
+loss_trends:
+  every_n_steps: 500
+
+hf_upload:
+  enabled: false
+  repo_id: ""
+  repo_type: "model"
+  path_prefix: "stage1_jepa_decoder"
+
+wandb:
+  enabled: false
+  project: "factorjepa-stage1"
+  entity: ""
+  run_name: ""
+  group: ""
+  tags: ["stage1", "jepa-decoder", "cosmos-vae"]
+  resume: "allow"
+  api_key: ""
+
+num_training_steps_by_mode:
+  sanity: 20
+  poc: 2000
+  full: 14000
+
+checkpoint_every_n_steps: 500
+# For normal training, periodic checkpoints follow validation cadence instead
+# of the fixed fallback above. With every_n_epochs=0.25, this is quarter-epoch.
+checkpoint_on_validation: true
+# Numbered/final files are portable model-only artifacts. The latest file retains
+# optimizer and scheduler state for exact resume.
+checkpoint_include_optimizer_for_step_files: false
+checkpoint_include_optimizer_for_final: false
+
+validation:
+  enabled: true
+  run_before_training: true
+  # null lets the trainer derive the step interval from train size and runtime batch size.
+  every_n_steps: null
+  every_n_epochs: 0.25
+  seed: 1
+  fps: 16

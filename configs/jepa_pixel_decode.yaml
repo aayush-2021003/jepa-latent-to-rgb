@@ -1,0 +1,163 @@
+cosmos:
+  model_id: "nvidia/Cosmos-Predict2.5-2B"
+  revision: "diffusers/base/post-trained"
+  vae_subfolder: "vae"
+  dtype: "bfloat16"
+  enable_tiling: true
+  enable_slicing: false
+
+factorjepa:
+  dtype: "bfloat16"
+  activation_checkpointing: false
+
+decoder:
+  dim: 512
+  depth: 4
+  kernel_size: 3
+  dropout: 0.0
+  group_norm_groups: 8
+  position_init_std: 0.02
+
+optimization:
+  batch_size: 1
+  max_epochs:
+    sanity: 1
+    poc: 5
+    full: 5
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  gradient_clip: 1.0
+  warmup_fraction: 0.05
+  early_stopping_patience_epochs: 2
+  early_stopping_min_delta: 1.0e-5
+  validation_metric: "latent_mae"
+
+overfit_one:
+  max_epochs: 500
+  learning_rate: 1.0e-3
+  weight_decay: 0.0
+  gradient_clip: 1.0
+  warmup_fraction: 0.05
+  decoded_loss_every_epochs: 0
+  evaluation_every_epochs: 25
+  checkpoint_every_epochs: 25
+  latent_mae_target: 1.0e-3
+
+loss:
+  latent_l1_weight: 0.0
+  latent_mse_weight: 1.0
+  rgb_l1_weight: 0.0
+  spatial_gradient_weight: 0.0
+  temporal_difference_weight: 0.0
+  lpips_weight: 0.0
+  charbonnier_epsilon: 1.0e-3
+  decoded_loss_every_steps: 0
+
+data_loading:
+  tar_readers: 8
+  decode_workers: 8
+  queue_timeout_seconds: 600
+  reader_join_timeout_seconds: 10
+
+provenance:
+  sha256_chunk_size_bytes: 8388608
+
+validation:
+  batch_size: 1
+  qualitative_clips: 16
+
+evaluation:
+  batch_size: 1
+  qualitative_clips: 16
+  mask_seed: 20260809
+  mask_names:
+    - "small_blocks"
+    - "large_blocks"
+
+phase0:
+  batch_size: 1
+  qualitative_clips: 16
+
+metrics:
+  psnr_epsilon: 1.0e-10
+  lpips_enabled: true
+  lpips_net: "alex"
+  lpips_max_frames: 4
+
+bootstrap:
+  iterations: 10000
+  confidence_level: 0.95
+  seed: 42
+
+video:
+  fps: 16
+  labels:
+    font_size: 20
+    bar_height: 30
+    left_padding: 8
+    top_padding: 6
+    background_rgb: [0, 0, 0]
+    text_rgb: [255, 255, 255]
+
+splits:
+  seed: 42
+  manifest_filenames:
+    train: "train.json"
+    validation: "validation.json"
+    test: "test.json"
+  audit_filename: "split_audit.json"
+  ratios:
+    train: 0.80
+    validation: 0.10
+    test: 0.10
+  ratio_tolerance: 1.0e-8
+  global_balance_weight: 0.25
+  subsample_seed_offsets:
+    train: 0
+    validation: 1
+    test: 2
+  samples:
+    sanity:
+      train: 32
+      validation: 16
+      test: 16
+    poc:
+      train: 10000
+      validation: 1000
+      test: 1000
+    full:
+      train: 0
+      validation: 0
+      test: 0
+
+artifacts:
+  split_audit: "split_audit.json"
+  phase0_records: "phase0_records.jsonl"
+  phase0_records_csv: "phase0_records.csv"
+  phase0_metrics: "phase0_metrics.json"
+  phase0_gallery_dir: "gallery"
+  phase0_gallery_pattern: "clip_{index:05d}.mp4"
+  oracle_log_prefix: "oracle_train"
+  oracle_latest_checkpoint: "oracle_decoder_latest.pt"
+  oracle_best_checkpoint: "oracle_decoder_best.pt"
+  oracle_final_checkpoint: "oracle_decoder_final.pt"
+  oracle_validation_dir: "validation"
+  oracle_validation_records: "metrics.jsonl"
+  oracle_validation_records_csv: "metrics.csv"
+  oracle_validation_summary: "summary.json"
+  oracle_epoch_dir_pattern: "epoch_{epoch:03d}"
+  oracle_gallery_dir: "gallery"
+  oracle_gallery_pattern: "clip_{index:05d}.mp4"
+  overfit_log_prefix: "overfit_one_train"
+  overfit_latest_checkpoint: "overfit_one_latest.pt"
+  overfit_best_checkpoint: "overfit_one_best.pt"
+  overfit_final_checkpoint: "overfit_one_final.pt"
+  overfit_metrics_records: "overfit_one_metrics.jsonl"
+  overfit_metrics_summary: "overfit_one_summary.json"
+  overfit_gallery_dir: "overfit_gallery"
+  overfit_gallery_pattern: "epoch_{epoch:04d}.mp4"
+  predicted_records: "predicted_records.jsonl"
+  predicted_records_csv: "predicted_records.csv"
+  predicted_metrics: "predicted_metrics.json"
+  predicted_gallery_dir: "gallery"
+  predicted_gallery_pattern: "clip_{index:05d}.mp4"

@@ -1,0 +1,68 @@
+hidden_dim: 256
+depth: 6
+kernel_size: 3
+dropout: 0.0
+cond_dim: 512
+residual_scale: 1.0
+
+learning_rate: 1.0e-4
+weight_decay: 0.01
+grad_clip: 1.0
+scheduler_warmup_steps: 0
+
+loss:
+  # Stage 2 remains anchored to the target latent while optimizing decoded quality.
+  latent_mse_weight: 1.0
+  latent_l1_weight: 0.1
+  rgb_l1_weight: 0.2
+  spatial_gradient_weight: 0.05
+  temporal_difference_weight: 0.05
+  lpips_weight: 0.05
+  lpips_net: "alex"
+  lpips_max_frames: 4
+  charbonnier_eps: 1.0e-3
+  decoded_loss_every_n_steps: 1
+
+overfit:
+  enabled: false
+  num_training_steps: 1000
+  fixed_mask_seed: 1
+  max_tar_files: 1
+
+indexed_split:
+  enabled: false
+  tar_index: 0
+  source_num_samples: 1000
+  validation_every_nth: 50
+  one_based_nth: true
+  num_training_steps: 10000
+  max_tar_files: 1
+
+random_split:
+  enabled: true
+  # Must point to the manifest created by Stage-1.
+  manifest_path: "data/splits/walkindia_first3_seed42.json"
+  seed: 42
+  max_tar_files: 3
+  source_num_samples: 3000
+  test_fraction: 0.10
+  validation_num_samples: 50
+  num_training_steps: 10000
+
+checkpoint_every_n_steps: 500
+checkpoint_on_validation: true
+checkpoint_include_optimizer_for_step_files: false
+checkpoint_include_optimizer_for_final: false
+
+memory:
+  # Recompute VAE decoder activations during backward for decoded RGB/LPIPS losses.
+  vae_gradient_checkpointing: true
+
+validation:
+  enabled: true
+  run_before_training: true
+  # null lets the trainer derive the step interval from train size and runtime batch size.
+  every_n_steps: null
+  every_n_epochs: 0.25
+  seed: 1
+  fps: 16

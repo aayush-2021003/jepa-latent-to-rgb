@@ -1,0 +1,32 @@
+model_id: "nvidia/Cosmos-Predict2.5-2B"
+revision: "diffusers/base/post-trained"
+
+lora_rank: 32
+lora_alpha: 32
+use_dora: false
+
+projector_hidden_mult: 2.0
+cosmos_cross_attn_dim_fallback: 1024
+context_tokens: 98
+bypass_cosmos_crossattn_proj: true
+
+learning_rate: 1.0e-4
+weight_decay: 0.01
+grad_clip: 1.0
+
+scheduler_warmup_steps: 200
+
+num_training_steps_by_mode:
+  sanity: 20
+  poc: 2000
+  full: 20000
+
+checkpoint_every_n_steps: 50
+
+validation:
+  enabled: true
+  run_before_training: true
+  every_n_steps: 50
+  num_inference_steps: 24
+  seed: 1
+  fps: 16

@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080">
+  <defs>
+    <style>
+      .bg { fill: #f7f8fb; }
+      .title { font: 700 42px Arial, Helvetica, sans-serif; fill: #182033; }
+      .subtitle { font: 400 22px Arial, Helvetica, sans-serif; fill: #526078; }
+      .section { font: 700 20px Arial, Helvetica, sans-serif; letter-spacing: 0.4px; fill: #526078; }
+      .label { font: 700 24px Arial, Helvetica, sans-serif; fill: #172033; }
+      .small { font: 400 19px Arial, Helvetica, sans-serif; fill: #354057; }
+      .tiny { font: 400 16px Arial, Helvetica, sans-serif; fill: #5d687d; }
+      .badge { font: 700 15px Arial, Helvetica, sans-serif; fill: #ffffff; }
+      .frozen { fill: #e9eef7; stroke: #9badc9; stroke-width: 2.5; }
+      .trainable { fill: #eaf7ef; stroke: #55a66e; stroke-width: 2.5; }
+      .target { fill: #fff3df; stroke: #dc9a36; stroke-width: 2.5; }
+      .loss { fill: #f5eafe; stroke: #a873d9; stroke-width: 2.5; }
+      .io { fill: #ffffff; stroke: #65748d; stroke-width: 2.5; }
+      .pill-frozen { fill: #63799e; }
+      .pill-trainable { fill: #2f8f56; }
+      .pill-loss { fill: #8956ba; }
+      .arrow { stroke: #30394d; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
+      .arrow-soft { stroke: #75849d; stroke-width: 2.6; fill: none; marker-end: url(#arrow-soft); }
+      .arrow-loss { stroke: #8956ba; stroke-width: 2.8; fill: none; marker-end: url(#arrow-loss); stroke-dasharray: 8 7; }
+      .group { fill: none; stroke: #c7cfdd; stroke-width: 2; stroke-dasharray: 10 8; rx: 18; }
+    </style>
+    <marker id="arrow" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L14,8 L2,14 Z" fill="#30394d"/>
+    </marker>
+    <marker id="arrow-soft" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L14,8 L2,14 Z" fill="#75849d"/>
+    </marker>
+    <marker id="arrow-loss" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L14,8 L2,14 Z" fill="#8956ba"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1800" height="1080"/>
+
+  <text class="title" x="80" y="72">Stage-1: FactorJEPA Tokens to Cosmos VAE Latents</text>
+  <text class="subtitle" x="80" y="110">Goal: train only a compact decoder to reconstruct the full 16-frame video from frozen FactorJEPA representations.</text>
+
+  <rect class="group" x="58" y="145" width="1684" height="540" rx="18"/>
+  <text class="section" x="82" y="180">FORWARD RECONSTRUCTION PATH</text>
+
+  <rect class="io" x="85" y="235" width="265" height="122" rx="14"/>
+  <text class="label" x="122" y="280">Input Video</text>
+  <text class="small" x="120" y="315">B x 3 x 16 x 384 x 384</text>
+  <text class="tiny" x="120" y="340">RGB clip, normalized</text>
+
+  <path class="arrow" d="M350 296 H445"/>
+
+  <rect class="frozen" x="445" y="210" width="315" height="172" rx="14"/>
+  <rect class="pill-frozen" x="468" y="230" width="76" height="26" rx="13"/>
+  <text class="badge" x="481" y="249">FROZEN</text>
+  <text class="label" x="486" y="286">FactorJEPA</text>
+  <text class="small" x="486" y="318">student + predictor</text>
+  <text class="small" x="486" y="348">mask varies in training</text>
+  <text class="tiny" x="486" y="372">visible tokens + predicted tokens</text>
+
+  <path class="arrow" d="M760 296 H855"/>
+
+  <rect class="io" x="855" y="210" width="330" height="172" rx="14"/>
+  <text class="label" x="900" y="270">Combined JEPA Grid</text>
+  <text class="small" x="900" y="305">B x 4608 x 5632</text>
+  <text class="tiny" x="900" y="334">grid = 8 x 24 x 24</text>
+  <text class="tiny" x="900" y="360">5632 = 4 levels x 1408</text>
+
+  <path class="arrow" d="M1185 296 H1280"/>
+
+  <rect class="trainable" x="1280" y="160" width="365" height="272" rx="14"/>
+  <rect class="pill-trainable" x="1303" y="180" width="101" height="26" rx="13"/>
+  <text class="badge" x="1316" y="199">TRAINABLE</text>
+  <text class="label" x="1324" y="242">Stage-1 Decoder</text>
+  <text class="small" x="1324" y="278">level fusion: 5632 -> 1408</text>
+  <text class="small" x="1324" y="309">projection: 1408 -> 512</text>
+  <text class="small" x="1324" y="340">3D Conv blocks: 8x24x24</text>
+  <text class="small" x="1324" y="371">resize: 8x24x24 -> 4x48x48</text>
+  <text class="tiny" x="1324" y="402">about 59.7M trainable params</text>
+
+  <path class="arrow" d="M1462 432 V512"/>
+
+  <rect class="target" x="1278" y="512" width="370" height="124" rx="14"/>
+  <text class="label" x="1320" y="558">Predicted Cosmos Latent</text>
+  <text class="small" x="1320" y="594">z_hat: B x 16 x 4 x 48 x 48</text>
+  <text class="tiny" x="1320" y="620">normalized latent space</text>
+
+  <path class="arrow" d="M1278 574 H1120"/>
+
+  <rect class="frozen" x="795" y="512" width="325" height="124" rx="14"/>
+  <rect class="pill-frozen" x="820" y="532" width="76" height="26" rx="13"/>
+  <text class="badge" x="833" y="551">FROZEN</text>
+  <text class="label" x="835" y="592">Cosmos VAE Decoder</text>
+  <text class="tiny" x="835" y="620">differentiable for pixel losses</text>
+
+  <path class="arrow" d="M795 574 H640"/>
+
+  <rect class="io" x="350" y="512" width="290" height="124" rx="14"/>
+  <text class="label" x="399" y="558">Reconstruction</text>
+  <text class="small" x="392" y="594">B x 3 x 16 x 384 x 384</text>
+  <text class="tiny" x="392" y="620">full video, not mask-only</text>
+
+  <rect class="group" x="58" y="720" width="1684" height="248" rx="18"/>
+  <text class="section" x="82" y="755">TRAINING SIGNALS</text>
+
+  <rect class="frozen" x="88" y="795" width="305" height="120" rx="14"/>
+  <rect class="pill-frozen" x="112" y="815" width="76" height="26" rx="13"/>
+  <text class="badge" x="125" y="834">FROZEN</text>
+  <text class="label" x="125" y="874">Cosmos VAE Encoder</text>
+  <text class="small" x="125" y="902">GT latent z: B x 16 x 4 x 48 x 48</text>
+
+  <path class="arrow-soft" d="M220 357 C220 500 220 650 240 795"/>
+
+  <rect class="loss" x="548" y="790" width="330" height="132" rx="14"/>
+  <rect class="pill-loss" x="573" y="812" width="57" height="26" rx="13"/>
+  <text class="badge" x="586" y="831">LOSS</text>
+  <text class="label" x="585" y="871">Latent Loss</text>
+  <text class="small" x="585" y="904">MSE 1.0 + Charbonnier 0.1</text>
+
+  <path class="arrow-loss" d="M393 855 H548"/>
+  <path class="arrow-loss" d="M1462 636 C1462 725 1120 856 878 856"/>
+
+  <rect class="loss" x="1018" y="790" width="375" height="132" rx="14"/>
+  <rect class="pill-loss" x="1043" y="812" width="57" height="26" rx="13"/>
+  <text class="badge" x="1056" y="831">LOSS</text>
+  <text class="label" x="1055" y="871">Decoded Video Loss</text>
+  <text class="small" x="1055" y="904">RGB 0.2 + spatial 0.05 + temporal 0.05 + LPIPS 0.05</text>
+
+  <path class="arrow-loss" d="M495 636 C495 705 830 856 1018 856"/>
+  <path class="arrow-loss" d="M218 357 C185 580 735 856 1018 856"/>
+
+  <rect class="trainable" x="1500" y="790" width="190" height="132" rx="14"/>
+  <text class="label" x="1540" y="846">Update</text>
+  <text class="small" x="1535" y="880">Stage-1</text>
+  <text class="small" x="1535" y="906">decoder only</text>
+
+  <path class="arrow-loss" d="M878 856 H1018"/>
+  <path class="arrow-loss" d="M1393 856 H1500"/>
+
+  <text class="tiny" x="82" y="1010">Validation uses deterministic per-clip JEPA masks; training masks are not fixed. Cosmos DiT is not used in Stage-1.</text>
+  <text class="tiny" x="82" y="1040">Current experiment: first 3 TARs, 2650 train / 50 validation / 300 test, validation every quarter epoch.</text>
+</svg>
