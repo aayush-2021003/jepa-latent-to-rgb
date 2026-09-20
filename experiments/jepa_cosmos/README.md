@@ -157,13 +157,15 @@ bash scripts/run_jepa_cosmos.sh train configs/experiments/jepa_cosmos_adapter.ya
 ```
 
 This mode uses the same 16 cached validation examples for training and validation,
-disables data-loader parallelism and validation-video uploads, and writes to
+disables data-loader parallelism, and writes to
 `outputs/jepa_cosmos/overfit` so it cannot resume from or overwrite the full run.
 With batch size 2, no gradient accumulation, and 125 epochs, it performs exactly
-1,000 optimizer updates. Validation runs every 50 updates and at every epoch end.
-Metrics and checkpoints are still logged to a clearly named W&B run; Hugging Face
-uploading is disabled for this diagnostic mode by default. The latent cache has no
-training-time augmentation, so augmentation is effectively disabled.
+1,000 optimizer updates. Validation runs every 50 updates and at every epoch end;
+the full preview-video set is logged to W&B at each 50-update interval. Metrics are
+logged to a clearly named W&B run, while diagnostic checkpoints remain in the isolated
+local output directory; Hugging Face uploading is disabled for this mode by default.
+The latent cache has no training-time
+augmentation, so augmentation is effectively disabled.
 
 ## Inference
 

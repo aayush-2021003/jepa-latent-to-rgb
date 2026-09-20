@@ -70,7 +70,7 @@ overfit:
   gradient_accumulation_steps: 1
   validate_every_optimizer_steps: 50
   num_workers: 0
-  log_validation_videos: false
+  log_validation_videos: true
   push_to_huggingface: false
 
 loss:

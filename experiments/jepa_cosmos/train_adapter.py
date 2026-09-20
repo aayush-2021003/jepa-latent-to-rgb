@@ -156,7 +156,11 @@ def validation_record(
     }
 
 
-def log_validation_to_wandb(run, record: dict) -> None:
+def log_validation_to_wandb(
+    run,
+    record: dict,
+    video_paths: list[Path] | None = None,
+) -> None:
     if run is None:
         return
     payload = {
@@ -170,6 +174,17 @@ def log_validation_to_wandb(run, record: dict) -> None:
         "validation/predicted_cosine": record["predicted_cosine"],
         "validation/samples": record["samples"],
     }
+    if video_paths:
+        import wandb
+
+        payload.update(
+            {
+                f"validation/sample_{index:02d}": wandb.Video(
+                    str(path), fps=4, format="mp4"
+                )
+                for index, path in enumerate(video_paths)
+            }
+        )
     run.log(payload, step=record["global_step"])
 
 
@@ -427,7 +442,16 @@ def main() -> None:
                 )
                 validation_history.append(record)
                 atomic_json_dump(validation_history, validation_history_path)
-                log_validation_to_wandb(run, record)
+                interval_videos = None
+                if (
+                    args.overfit
+                    and decoder is not None
+                    and config["tracking"]["log_validation_videos"]
+                ):
+                    interval_videos = render_previews(
+                        adapter, decoder, config, output_dir
+                    )
+                log_validation_to_wandb(run, record, interval_videos)
                 last_validation_optimizer_step = optimizer_step
                 if validation["oracle_loss"] < best_metric:
                     best_metric = validation["oracle_loss"]
@@ -525,6 +549,7 @@ def main() -> None:
             best_updated_this_epoch
             and decoder is not None
             and config["tracking"]["log_validation_videos"]
+            and not args.overfit
         ):
             best_state = torch.load(best_path, map_location="cpu", weights_only=False)
             adapter.load_state_dict(best_state["adapter"])
