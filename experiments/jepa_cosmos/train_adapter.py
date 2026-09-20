@@ -273,6 +273,20 @@ def main() -> None:
     device = require_cuda()
     train_cfg = config["training"]
     loss_cfg = config["loss"]
+    input_latent = train_cfg.get("input_latent", "target")
+    if input_latent not in {"target", "predicted"}:
+        raise ValueError("training.input_latent must be 'target' or 'predicted'")
+    training_input_key = (
+        "jepa_predicted" if input_latent == "predicted" else "jepa_target"
+    )
+    selection_metric = train_cfg.get(
+        "selection_metric",
+        "predicted_loss" if input_latent == "predicted" else "oracle_loss",
+    )
+    if selection_metric not in {"oracle_loss", "predicted_loss"}:
+        raise ValueError(
+            "training.selection_metric must be 'oracle_loss' or 'predicted_loss'"
+        )
     validation_interval = int(train_cfg["validate_every_optimizer_steps"])
     if validation_interval <= 0:
         raise ValueError("validate_every_optimizer_steps must be positive")
@@ -288,6 +302,16 @@ def main() -> None:
         seed=config["experiment"]["seed"],
         max_samples=overfit_samples,
     )
+    if (
+        input_latent == "predicted"
+        and not train_dataset.manifest.get("metadata", {}).get(
+            "contains_jepa_predicted", False
+        )
+    ):
+        raise RuntimeError(
+            "Predicted-only training requires jepa_predicted in the training cache. "
+            "Run the cache stage with the predicted-only config."
+        )
     val_dataset = LatentShardDataset(
         project_path(config["data"]["cache_root"]) / "val",
         shuffle=False,
@@ -357,7 +381,11 @@ def main() -> None:
         )
         best_metric = state["best_metric"]
 
-    run_name = config["experiment"]["name"] if args.overfit else None
+    run_name = (
+        config["experiment"]["name"]
+        if args.overfit or input_latent == "predicted"
+        else None
+    )
     run = None if args.no_wandb else start_wandb(config, "adapter-training", run_name)
     if run is not None:
         run.define_metric("optimizer_step")
@@ -383,12 +411,12 @@ def main() -> None:
         validation = None
         progress = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{train_cfg['epochs']}", unit="batch")
         for batch_index, batch in enumerate(progress):
-            jepa_target = batch["jepa_target"].to(device, non_blocking=True)
+            jepa_input = batch[training_input_key].to(device, non_blocking=True)
             cosmos_anchor = batch["cosmos_anchor"].to(device, non_blocking=True)
             cosmos_target = batch["cosmos_target"].to(device, non_blocking=True)
             target_shape = tuple(cosmos_target.shape[-3:])
             with torch.autocast("cuda", dtype=precision_dtype):
-                prediction = adapter(jepa_target, target_shape)
+                prediction = adapter(jepa_input, target_shape)
                 loss, parts = latent_alignment_loss(
                     prediction,
                     cosmos_target,
@@ -422,7 +450,7 @@ def main() -> None:
                         parts["perceptual"] = perceptual_value
                 scaled_loss = loss / train_cfg["gradient_accumulation_steps"]
             scaled_loss.backward()
-            batch_size = jepa_target.shape[0]
+            batch_size = jepa_input.shape[0]
             should_step = (
                 (batch_index + 1) % train_cfg["gradient_accumulation_steps"] == 0
                 or samples + batch_size >= len(train_dataset)
@@ -469,8 +497,8 @@ def main() -> None:
                     )
                 log_validation_to_wandb(run, record, interval_videos)
                 last_validation_optimizer_step = optimizer_step
-                if validation["oracle_loss"] < best_metric:
-                    best_metric = validation["oracle_loss"]
+                if validation[selection_metric] < best_metric:
+                    best_metric = validation[selection_metric]
                     best_updated_this_epoch = True
                     best_metrics_this_epoch = {**record, "best_metric": best_metric}
                     save_checkpoint(
@@ -500,8 +528,8 @@ def main() -> None:
             validation_history.append(record)
             atomic_json_dump(validation_history, validation_history_path)
             log_validation_to_wandb(run, record)
-            if validation["oracle_loss"] < best_metric:
-                best_metric = validation["oracle_loss"]
+            if validation[selection_metric] < best_metric:
+                best_metric = validation[selection_metric]
                 best_updated_this_epoch = True
                 best_metrics_this_epoch = {**record, "best_metric": best_metric}
                 save_checkpoint(
@@ -564,8 +592,11 @@ def main() -> None:
     curve_path = output_dir / "loss_curves.png"
     plot_history(history, curve_path)
     summary = {
-        "mode": "overfit" if args.overfit else "full",
-        "best_validation_oracle_loss": best_metric,
+        "mode": "overfit" if args.overfit else f"{input_latent}-only",
+        "training_input_latent": input_latent,
+        "selection_metric": selection_metric,
+        "best_validation_metric": best_metric,
+        f"best_validation_{selection_metric}": best_metric,
         "epochs_completed": len(history),
         "global_step": global_step,
         "optimizer_step": optimizer_step,

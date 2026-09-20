@@ -54,6 +54,7 @@ def push_checkpoint_to_hub(
 
     token = require_secret("HF_TOKEN", aliases=("HF_ACCESS_TOKEN",))
     hub_cfg = config["huggingface"]
+    input_latent = config.get("training", {}).get("input_latent", "target")
     repo_id = hub_cfg["repo_id"]
     api = HfApi(token=token)
     api.create_repo(
@@ -90,8 +91,8 @@ def push_checkpoint_to_hub(
         "- world-models\n"
         "---\n\n"
         "# FactorJEPA to Cosmos future-latent adapter\n\n"
-        "This repository contains the small trainable adapter that maps frozen "
-        "FactorJEPA future tokens into NVIDIA Cosmos continuous video latents. "
+        "This repository contains the trainable adapter that maps frozen "
+        f"FactorJEPA {input_latent} future tokens into NVIDIA Cosmos continuous video latents. "
         "It predicts two future latent slots; a separately encoded last-context-frame "
         "anchor is prepended only for causal 4k+1 decoding. "
         "It does not contain the upstream FactorJEPA or Cosmos weights.\n\n"

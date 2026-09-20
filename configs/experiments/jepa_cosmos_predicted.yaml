@@ -1,7 +1,7 @@
 experiment:
-  name: factorjepa-cosmos-future-adapter
+  name: factorjepa-cosmos-predicted-future-adapter
   seed: 42
-  output_dir: outputs/jepa_cosmos
+  output_dir: outputs/jepa_cosmos_predicted
 
 data:
   archive_repo: anonymousML123/denseworld-115k_archive
@@ -12,7 +12,10 @@ data:
   train_samples: 4500
   val_samples: 500
   local_root: data/jepa_cosmos_5k
-  cache_root: data/jepa_cosmos_5k_latents
+  # Separate cache preserves the completed oracle-only experiment. This cache
+  # stores causal FactorJEPA predictions for both train and validation samples.
+  cache_root: data/jepa_cosmos_5k_latents_predicted
+  cache_predicted_train: true
   num_frames: 16
   context_frames: 8
   crop_size: 384
@@ -21,7 +24,6 @@ data:
   decode_workers: 8
 
 factorjepa:
-  # The published checkpoint below is the 1B ViT-g variant, not the 2B ViT-G model.
   model_config: configs/model/vjepa2_1_vitg.yaml
   checkpoint_repo: anonymousML123/factorjepa-outputs
   checkpoint_repo_type: dataset
@@ -37,7 +39,6 @@ cosmos:
   temporal_compression: 4
   latent_channels: 16
   dtype: bfloat16
-  # Decode [last observed context frame | 8 predicted future frames] as 4k+1=9.
   anchor_last_context_frame: true
 
 adapter:
@@ -47,27 +48,23 @@ adapter:
   dropout: 0.0
 
 training:
-  input_latent: target
-  selection_metric: oracle_loss
+  input_latent: predicted
+  selection_metric: predicted_loss
   batch_size: 2
   gradient_accumulation_steps: 8
-  # 4,500 samples / effective batch 16 = ~282 optimizer steps per epoch;
-  # 10 epochs gives approximately 2,820 optimizer updates.
-  epochs: 10
+  # ~282 optimizer updates per epoch; 20 epochs gives ~5,640 updates.
+  epochs: 20
   learning_rate: 0.0002
   min_learning_rate: 0.000002
   weight_decay: 0.01
   max_grad_norm: 1.0
   num_workers: 2
   mixed_precision: bfloat16
-  # Full 500-sample validation plus 8 preview videos every 150 optimizer updates;
-  # scalar validation also runs at every epoch end.
   validate_every_optimizer_steps: 150
   decoded_loss_every_steps: 0
   resume: true
 
-# Enable with `train ... --overfit`. One cached validation sample is reused for
-# training and validation, giving exactly 3,000 optimizer updates.
+# Retained for config-schema compatibility; do not pass --overfit for this run.
 overfit:
   samples: 1
   epochs: 3000
@@ -94,7 +91,7 @@ tracking:
   log_validation_videos: true
 
 huggingface:
-  repo_id: Aaypom/factorjepa-cosmos-future-adapter
+  repo_id: Aaypom/factorjepa-cosmos-predicted-adapter
   private: false
   push_best: true
   push_latest: true

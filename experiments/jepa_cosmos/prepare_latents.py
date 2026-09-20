@@ -140,6 +140,9 @@ def prepare_split(
     local_root = project_path(data_cfg["local_root"]) / split
     keys = load_keys(local_root / f"{split}.json")
     factor_path = project_path(config["factorjepa"]["checkpoint_path"])
+    include_prediction = split == "val" or bool(
+        data_cfg.get("cache_predicted_train", False)
+    )
     metadata = {
         "split": split,
         "factorjepa_checkpoint": checkpoint_fingerprint(factor_path),
@@ -150,6 +153,8 @@ def prepare_split(
         "input_dim": config["adapter"]["input_dim"],
         "cosmos_target_schema": "last_context_anchor_plus_future_v1",
     }
+    if data_cfg.get("cache_predicted_train", False):
+        metadata["contains_jepa_predicted"] = include_prediction
     cache_root = project_path(data_cfg["cache_root"]) / split
     writer = CacheWriter(cache_root, data_cfg["cache_samples_per_shard"], metadata)
     remaining = set(keys) - writer.processed
@@ -196,7 +201,7 @@ def prepare_split(
                 "cosmos_target": cosmos_target,
             }
             jepa_predicted = None
-            if split == "val":
+            if include_prediction:
                 jepa_predicted = world_model.predict_future(
                     normalized[:, :data_cfg["context_frames"]]
                 )[0].cpu().half()

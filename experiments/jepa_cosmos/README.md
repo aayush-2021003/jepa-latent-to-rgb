@@ -192,3 +192,30 @@ The output directory contains `context.mp4`, `ground_truth_future.mp4`,
 `predicted_future.mp4`, `metrics.json`, and `comparison.mp4`. The comparison columns
 are, from left to right: ground truth, Cosmos reconstruction ceiling, adapter from
 true JEPA future tokens, and adapter from the actual causal FactorJEPA prediction.
+
+## Fresh predicted-latent experiment
+
+The separate `configs/experiments/jepa_cosmos_predicted.yaml` experiment trains a
+randomly initialized 512-channel, six-block adapter directly on causal FactorJEPA
+predictions. It uses 20 epochs and selects its best checkpoint by
+`validation/predicted_loss`. Its cache, outputs, W&B run name, and Hugging Face model
+repository are separate from the completed oracle-only baseline.
+
+The raw 5K DenseWorld subset and model assets are reused. Build the new cache because
+the oracle cache stores predictions only for validation, whereas this experiment
+requires predictions for all 4,500 training clips:
+
+```bash
+bash scripts/run_jepa_cosmos.sh cache configs/experiments/jepa_cosmos_predicted.yaml
+```
+
+Then start the fresh run without `--overfit`:
+
+```bash
+bash scripts/run_jepa_cosmos.sh train configs/experiments/jepa_cosmos_predicted.yaml
+```
+
+The cache is written to `data/jepa_cosmos_5k_latents_predicted`, checkpoints to
+`outputs/jepa_cosmos_predicted`, and remote checkpoints to
+`Aaypom/factorjepa-cosmos-predicted-adapter`. The original oracle cache and
+`outputs/jepa_cosmos` remain untouched.
