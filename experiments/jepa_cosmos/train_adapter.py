@@ -60,7 +60,9 @@ def enable_overfit_mode(config: dict) -> dict:
         "num_workers",
     ):
         config["training"][key] = mode[key]
-    config["tracking"]["log_validation_videos"] = mode["log_validation_videos"]
+    # Overfit mode is a visual pipeline diagnostic: always log previews at the
+    # configured validation interval, even when an older copied YAML says false.
+    config["tracking"]["log_validation_videos"] = True
     config["_overfit_mode"] = True
     return config
 
