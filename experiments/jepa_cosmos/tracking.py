@@ -34,12 +34,13 @@ def log_file_artifact(run, name: str, artifact_type: str, paths: list[Path]) -> 
     run.log_artifact(artifact)
 
 
-def log_video(run, key: str, path: Path, fps: int) -> None:
+def log_video(run, key: str, path: Path) -> None:
     import wandb
 
     if not path.is_file():
         raise FileNotFoundError(path)
-    run.log({key: wandb.Video(str(path), fps=fps, format="mp4")})
+    # A file-backed MP4 already contains its frame rate; W&B ignores `fps` here.
+    run.log({key: wandb.Video(str(path), format="mp4")})
 
 
 def push_checkpoint_to_hub(

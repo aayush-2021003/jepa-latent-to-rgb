@@ -196,7 +196,7 @@ def log_validation_to_wandb(
         payload.update(
             {
                 f"validation/sample_{index:02d}": wandb.Video(
-                    str(path), fps=4, format="mp4"
+                    str(path), format="mp4"
                 )
                 for index, path in enumerate(video_paths)
             }
@@ -574,7 +574,7 @@ def main() -> None:
             videos = render_previews(adapter, decoder, config, output_dir)
             if run is not None:
                 for index, path in enumerate(videos):
-                    log_video(run, f"validation/sample_{index:02d}", path, fps=4)
+                    log_video(run, f"validation/sample_{index:02d}", path)
             latest_state = torch.load(latest_path, map_location="cpu", weights_only=False)
             adapter.load_state_dict(latest_state["adapter"])
 

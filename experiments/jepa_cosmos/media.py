@@ -19,7 +19,8 @@ COMPARISON_LABELS = (
 
 def _label_comparison_frame(frame: np.ndarray, panel_width: int) -> np.ndarray:
     """Add a persistent header bar above each comparison column."""
-    header_height = 36
+    # 384px video + 32px header = 416px, divisible by H.264's 16px macroblock.
+    header_height = 32
     height, width, channels = frame.shape
     canvas = Image.new("RGB", (width, height + header_height), color=(18, 18, 18))
     canvas.paste(Image.fromarray(frame), (0, header_height))
