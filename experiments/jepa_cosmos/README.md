@@ -150,9 +150,9 @@ validation overhead but do not change optimization.
 
 The default 5K run uses 4,500 training samples, 500 validation samples, and 10
 epochs. That is approximately 282 optimizer updates per epoch and 2,820 total
-updates. The complete 500-sample validation split runs every 100 optimizer updates
+updates. The complete 500-sample validation split runs every 150 optimizer updates
 and at every epoch end. All eight fixed preview videos are uploaded to W&B at every
-100-update validation, regardless of whether the checkpoint is a new best. Epoch-end
+150-update validation, regardless of whether the checkpoint is a new best. Epoch-end
 validation outside those intervals logs scalars only.
 
 ### Overfit smoke test

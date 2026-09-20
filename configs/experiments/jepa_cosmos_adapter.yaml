@@ -58,9 +58,9 @@ training:
   max_grad_norm: 1.0
   num_workers: 2
   mixed_precision: bfloat16
-  # Full 500-sample validation plus 8 preview videos every 100 optimizer updates;
+  # Full 500-sample validation plus 8 preview videos every 150 optimizer updates;
   # scalar validation also runs at every epoch end.
-  validate_every_optimizer_steps: 100
+  validate_every_optimizer_steps: 150
   decoded_loss_every_steps: 0
   resume: true
 
