@@ -12,10 +12,31 @@ import os
 import sys
 from pathlib import Path
 
-VJEPA2_ROOT = Path(__file__).parent.parent.parent / "deps" / "vjepa2"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FACTORJEPA_SRC = PROJECT_ROOT / "src"
+VJEPA2_ROOT = PROJECT_ROOT / "deps" / "vjepa2"
 
 _loaded_base = False
 _loaded_2_1 = False
+
+
+def _without_factorjepa_paths(paths):
+    """Remove this checkout's import roots without assuming its directory name."""
+    excluded = {PROJECT_ROOT.resolve(), FACTORJEPA_SRC.resolve()}
+    result = []
+    for entry in paths:
+        if not entry:
+            # CWD is changed to /tmp while importing, so an empty entry is safe.
+            result.append(entry)
+            continue
+        try:
+            resolved = Path(entry).resolve()
+        except (OSError, RuntimeError):
+            result.append(entry)
+            continue
+        if resolved not in excluded:
+            result.append(entry)
+    return result
 
 
 def _ensure_loaded_base():
@@ -35,10 +56,7 @@ def _ensure_loaded_base():
             saved_modules[key] = sys.modules.pop(key)
 
     os.chdir("/tmp")
-    sys.path = [vjepa2_root] + [
-        p for p in saved_path
-        if "factorjepa/src" not in p
-    ]
+    sys.path = [vjepa2_root] + _without_factorjepa_paths(saved_path)
     importlib.invalidate_caches()
 
     try:
@@ -84,10 +102,7 @@ def _ensure_loaded_2_1():
             saved_modules[key] = sys.modules.pop(key)
 
     os.chdir("/tmp")
-    sys.path = [vjepa2_root] + [
-        p for p in saved_path
-        if "factorjepa/src" not in p
-    ]
+    sys.path = [vjepa2_root] + _without_factorjepa_paths(saved_path)
     importlib.invalidate_caches()
 
     try:
