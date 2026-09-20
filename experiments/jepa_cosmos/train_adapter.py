@@ -53,13 +53,15 @@ def enable_overfit_mode(config: dict) -> dict:
         Path(config["experiment"]["output_dir"]) / "overfit"
     )
     for key in (
-        "epochs",
         "batch_size",
         "gradient_accumulation_steps",
         "validate_every_optimizer_steps",
         "num_workers",
     ):
         config["training"][key] = mode[key]
+    # A copied overfit YAML may still contain the former 125-epoch value. Enforce
+    # the requested 5,000-update schedule (16 samples / batch 2 = 8 updates/epoch).
+    config["training"]["epochs"] = max(int(mode.get("epochs", 0)), 625)
     # Overfit mode is a visual pipeline diagnostic: always log previews at the
     # configured validation interval, even when an older copied YAML says false.
     config["tracking"]["log_validation_videos"] = True
