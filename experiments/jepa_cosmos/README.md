@@ -148,6 +148,11 @@ For a 48 GB GPU, retain `batch_size: 2` and
 `validate_every_optimizer_steps` to tune validation frequency; smaller values add
 validation overhead but do not change optimization.
 
+The default 5K run uses 4,500 training samples, 500 validation samples, and 10
+epochs. That is approximately 282 optimizer updates per epoch and 2,820 total
+updates. The complete 500-sample validation split runs every 200 optimizer updates
+and at every epoch end.
+
 ### Overfit smoke test
 
 Before the full run, memorize a tiny subset with:

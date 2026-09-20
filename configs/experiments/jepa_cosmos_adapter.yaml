@@ -49,7 +49,9 @@ adapter:
 training:
   batch_size: 2
   gradient_accumulation_steps: 8
-  epochs: 5
+  # 4,500 samples / effective batch 16 = ~282 optimizer steps per epoch;
+  # 10 epochs gives approximately 2,820 optimizer updates.
+  epochs: 10
   learning_rate: 0.0002
   min_learning_rate: 0.000002
   weight_decay: 0.01
