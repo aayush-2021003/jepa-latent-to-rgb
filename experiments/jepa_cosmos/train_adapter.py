@@ -30,7 +30,6 @@ from experiments.jepa_cosmos.media import write_comparison_video
 from experiments.jepa_cosmos.models import CosmosContinuousTokenizer, validate_model_geometry
 from experiments.jepa_cosmos.tracking import (
     log_file_artifact,
-    log_video,
     push_checkpoint_to_hub,
     start_wandb,
 )
@@ -462,8 +461,7 @@ def main() -> None:
                 atomic_json_dump(validation_history, validation_history_path)
                 interval_videos = None
                 if (
-                    args.overfit
-                    and decoder is not None
+                    decoder is not None
                     and config["tracking"]["log_validation_videos"]
                 ):
                     interval_videos = render_previews(
@@ -562,21 +560,6 @@ def main() -> None:
                 )
                 if run is not None:
                     run.summary["huggingface_best_checkpoint"] = url
-
-        if (
-            best_updated_this_epoch
-            and decoder is not None
-            and config["tracking"]["log_validation_videos"]
-            and not args.overfit
-        ):
-            best_state = torch.load(best_path, map_location="cpu", weights_only=False)
-            adapter.load_state_dict(best_state["adapter"])
-            videos = render_previews(adapter, decoder, config, output_dir)
-            if run is not None:
-                for index, path in enumerate(videos):
-                    log_video(run, f"validation/sample_{index:02d}", path)
-            latest_state = torch.load(latest_path, map_location="cpu", weights_only=False)
-            adapter.load_state_dict(latest_state["adapter"])
 
     curve_path = output_dir / "loss_curves.png"
     plot_history(history, curve_path)
