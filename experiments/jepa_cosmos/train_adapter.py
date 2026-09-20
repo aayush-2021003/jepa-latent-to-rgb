@@ -57,7 +57,7 @@ def enable_overfit_mode(config: dict) -> dict:
     mode["samples"] = 1
     config["training"].update(
         {
-            "epochs": 1000,
+            "epochs": 3000,
             "batch_size": 1,
             "gradient_accumulation_steps": 1,
             "learning_rate": 1e-3,

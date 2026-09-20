@@ -62,10 +62,10 @@ training:
   resume: true
 
 # Enable with `train ... --overfit`. One cached validation sample is reused for
-# training and validation, giving exactly 1,000 optimizer updates.
+# training and validation, giving exactly 3,000 optimizer updates.
 overfit:
   samples: 1
-  epochs: 1000
+  epochs: 3000
   batch_size: 1
   gradient_accumulation_steps: 1
   learning_rate: 0.001
