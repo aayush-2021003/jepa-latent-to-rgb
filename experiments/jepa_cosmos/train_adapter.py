@@ -52,16 +52,20 @@ def enable_overfit_mode(config: dict) -> dict:
     config["experiment"]["output_dir"] = str(
         Path(config["experiment"]["output_dir"]) / "overfit"
     )
-    for key in (
-        "batch_size",
-        "gradient_accumulation_steps",
-        "validate_every_optimizer_steps",
-        "num_workers",
-    ):
-        config["training"][key] = mode[key]
-    # A copied overfit YAML may still contain the former 125-epoch value. Enforce
-    # the requested 5,000-update schedule (16 samples / batch 2 = 8 updates/epoch).
-    config["training"]["epochs"] = max(int(mode.get("epochs", 0)), 625)
+    # Enforce the diagnostic settings even when the user runs with an older copied
+    # YAML. One sample and batch size one give one optimizer update per epoch.
+    mode["samples"] = 1
+    config["training"].update(
+        {
+            "epochs": 1000,
+            "batch_size": 1,
+            "gradient_accumulation_steps": 1,
+            "learning_rate": 1e-3,
+            "min_learning_rate": 1e-5,
+            "validate_every_optimizer_steps": 50,
+            "num_workers": 0,
+        }
+    )
     # Prevent an older copied YAML from silently selecting the original small
     # adapter. Changing these dimensions requires a fresh checkpoint directory.
     config["adapter"]["hidden_dim"] = max(
@@ -206,6 +210,8 @@ def render_previews(adapter, decoder, config, output_dir: Path) -> list[Path]:
     if not preview_path.is_file():
         raise FileNotFoundError(f"Validation preview cache not found: {preview_path}")
     preview = torch.load(preview_path, map_location="cpu", weights_only=False)
+    if config.get("_overfit_mode"):
+        preview = preview[: int(config["overfit"]["samples"])]
     paths = []
     device = next(adapter.parameters()).device
     future_frames = config["data"]["num_frames"] - config["data"]["context_frames"]

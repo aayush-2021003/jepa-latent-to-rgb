@@ -61,13 +61,15 @@ training:
   decoded_loss_every_steps: 0
   resume: true
 
-# Enable with `train ... --overfit`. The same 16 cached validation samples are
-# used for training and validation, giving exactly 5,000 optimizer updates.
+# Enable with `train ... --overfit`. One cached validation sample is reused for
+# training and validation, giving exactly 1,000 optimizer updates.
 overfit:
-  samples: 16
-  epochs: 625
-  batch_size: 2
+  samples: 1
+  epochs: 1000
+  batch_size: 1
   gradient_accumulation_steps: 1
+  learning_rate: 0.001
+  min_learning_rate: 0.00001
   validate_every_optimizer_steps: 50
   num_workers: 0
   log_validation_videos: true
