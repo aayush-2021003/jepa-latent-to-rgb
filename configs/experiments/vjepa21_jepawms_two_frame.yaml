@@ -1,0 +1,106 @@
+experiment:
+  name: vjepa21-jepawms-predicted-two-frame
+  seed: 42
+  output_dir: outputs/vjepa21_jepawms_two_frame
+
+data:
+  archive_repo: anonymousML123/denseworld-115k_archive
+  archive_prefix: data
+  clips_per_remote_shard: 1000
+  local_shard_size: 250
+  download_margin_shards: 1
+  train_samples: 4500
+  val_samples: 500
+  # Reuse the already prepared source-disjoint 5K RGB subset when it exists.
+  local_root: data/jepa_cosmos_5k
+  cache_root: data/vjepa21_jepawms_two_frame_cache
+  cache_samples_per_shard: 16
+  decode_workers: 8
+  num_frames: 16
+  context_frames: 14
+  target_frame_index: 15
+  target_frame_indices: [14, 15]
+  crop_size: 384
+  decoder_image_size: 256
+
+vjepa21:
+  model_id: facebookresearch/vjepa2:vjepa2_1_vit_giant_384
+  checkpoint_url: https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitg_384.pt
+  checkpoint_path: checkpoints/vjepa2_1_vitg_384.pt
+  encoder_checkpoint_key: target_encoder
+  dependency_root: deps/vjepa2
+  embed_dim: 1408
+  feature_levels: 4
+  patch_size: 16
+  tubelet_size: 2
+  predictor_embed_dim: 384
+  predictor_depth: 24
+  predictor_heads: 12
+  predictor_mask_tokens: 8
+
+jepa_wms_decoder:
+  model_id: facebook/jepa-wms
+  checkpoint_file: vjepa2_vitg_256_INet.pth.tar
+  checkpoint_path: checkpoints/jepa-wms/vjepa2_vitg_256_INet.pth.tar
+  dependency_repo: https://github.com/facebookresearch/jepa-wms.git
+  dependency_revision: 13cf1d9c7e476f53c17714d2e0f1dc239a883ce0
+  dependency_root: deps/jepa-wms
+  normalization: imagenet
+  architecture:
+    patch_size: 8
+    in_chans: 3
+    img_size: [256, 256]
+    embed_dim: 1408
+    decoder_embed_dim: 1024
+    depth: 12
+    num_heads: 16
+    mlp_ratio: 4.0
+    num_views: 1
+    use_activation_checkpointing: true
+
+adapter:
+  input_dim: 5632
+  levels: 4
+  level_dim: 1408
+  output_dim: 1408
+  output_frames: 2
+  residual_blocks: 6
+  expansion: 2
+  dropout: 0.1
+
+training:
+  epochs: 20
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0001
+  min_learning_rate: 0.000001
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  num_workers: 2
+  mixed_precision: bfloat16
+  validate_every_optimizer_steps: 150
+  validation_samples: 128
+  final_validation_samples: 500
+  checkpoint_every_optimizer_steps: 300
+  media_every_optimizer_steps: 150
+  media_samples: 8
+  selection_metric: frame16_predicted_lpips
+  resume: true
+
+loss:
+  rgb_l1: 1.0
+  perceptual: 0.2
+  feature_statistics: 0.01
+
+tracking:
+  wandb_entity: aayush21003-indraprastha-institute-of-information-techno
+  wandb_project: vjepa21-jepawms-two-frame
+  run_name: vjepa21-1b-predicted-two-frame-5k
+  log_every_optimizer_steps: 10
+  log_validation_media: true
+
+huggingface:
+  repo_id: Aaypom/vjepa21-jepawms-two-frame-adapter
+  private: false
+  push_best: true
+  push_latest: true
