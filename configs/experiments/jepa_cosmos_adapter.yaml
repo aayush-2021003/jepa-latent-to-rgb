@@ -42,8 +42,8 @@ cosmos:
 
 adapter:
   input_dim: 1408
-  hidden_dim: 256
-  residual_blocks: 4
+  hidden_dim: 512
+  residual_blocks: 6
   dropout: 0.0
 
 training:

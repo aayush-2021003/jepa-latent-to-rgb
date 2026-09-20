@@ -159,6 +159,9 @@ bash scripts/run_jepa_cosmos.sh train configs/experiments/jepa_cosmos_adapter.ya
 This mode uses the same 16 cached validation examples for training and validation,
 disables data-loader parallelism, and writes to
 `outputs/jepa_cosmos/overfit` so it cannot resume from or overwrite the full run.
+It enforces the larger 512-channel, six-residual-block adapter even when an older
+copied YAML still contains the original 256-channel, four-block settings. Because
+the parameter shapes differ, do not resume this model from a small-adapter checkpoint.
 With batch size 2, no gradient accumulation, and 625 epochs, it performs exactly
 5,000 optimizer updates. Validation runs every 50 updates and at every epoch end;
 the full preview-video set is logged to W&B at each 50-update interval. Metrics are

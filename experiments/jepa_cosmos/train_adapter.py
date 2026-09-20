@@ -62,6 +62,14 @@ def enable_overfit_mode(config: dict) -> dict:
     # A copied overfit YAML may still contain the former 125-epoch value. Enforce
     # the requested 5,000-update schedule (16 samples / batch 2 = 8 updates/epoch).
     config["training"]["epochs"] = max(int(mode.get("epochs", 0)), 625)
+    # Prevent an older copied YAML from silently selecting the original small
+    # adapter. Changing these dimensions requires a fresh checkpoint directory.
+    config["adapter"]["hidden_dim"] = max(
+        int(config["adapter"]["hidden_dim"]), 512
+    )
+    config["adapter"]["residual_blocks"] = max(
+        int(config["adapter"]["residual_blocks"]), 6
+    )
     # Overfit mode is a visual pipeline diagnostic: always log previews at the
     # configured validation interval, even when an older copied YAML says false.
     config["tracking"]["log_validation_videos"] = True
