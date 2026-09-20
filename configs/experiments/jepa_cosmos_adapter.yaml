@@ -1,0 +1,93 @@
+experiment:
+  name: factorjepa-cosmos-future-adapter
+  seed: 42
+  output_dir: outputs/jepa_cosmos
+
+data:
+  archive_repo: anonymousML123/denseworld-115k_archive
+  archive_prefix: data
+  clips_per_remote_shard: 1000
+  local_shard_size: 250
+  download_margin_shards: 1
+  train_samples: 4500
+  val_samples: 500
+  local_root: data/jepa_cosmos_5k
+  cache_root: data/jepa_cosmos_5k_latents
+  num_frames: 16
+  context_frames: 8
+  crop_size: 384
+  preview_samples: 8
+  cache_samples_per_shard: 32
+  decode_workers: 8
+
+factorjepa:
+  # The published checkpoint below is the 1B ViT-g variant, not the 2B ViT-G model.
+  model_config: configs/model/vjepa2_1_vitg.yaml
+  checkpoint_repo: anonymousML123/factorjepa-outputs
+  checkpoint_repo_type: dataset
+  checkpoint_file: outputs/full/vjepa_2_1_vitg_1B/train/m09c_surgery_3stage_DI_diheavy_encoder/m09c_ckpt_best.pt
+  checkpoint_path: checkpoints/factorjepa_diheavy_m09c_ckpt_best.pt
+  use_final_layer_only: true
+
+cosmos:
+  model_id: nvidia/Cosmos-0.1-Tokenizer-CV4x8x8
+  checkpoint_dir: checkpoints/Cosmos-0.1-Tokenizer-CV4x8x8
+  encoder_file: encoder.jit
+  decoder_file: decoder.jit
+  temporal_compression: 4
+  latent_channels: 16
+  dtype: bfloat16
+  # Decode [last observed context frame | 8 predicted future frames] as 4k+1=9.
+  anchor_last_context_frame: true
+
+adapter:
+  input_dim: 1408
+  hidden_dim: 256
+  residual_blocks: 4
+  dropout: 0.0
+
+training:
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  epochs: 5
+  learning_rate: 0.0002
+  min_learning_rate: 0.000002
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  num_workers: 2
+  mixed_precision: bfloat16
+  # Full 500-sample validation every 200 optimizer updates, plus every epoch end.
+  validate_every_optimizer_steps: 200
+  decoded_loss_every_steps: 0
+  resume: true
+
+# Enable with `train ... --overfit`. The same 16 cached validation samples are
+# used for training and validation, giving exactly 1,000 optimizer updates.
+overfit:
+  samples: 16
+  epochs: 125
+  batch_size: 2
+  gradient_accumulation_steps: 1
+  validate_every_optimizer_steps: 50
+  num_workers: 0
+  log_validation_videos: false
+  push_to_huggingface: false
+
+loss:
+  latent_l1: 1.0
+  latent_cosine: 0.1
+  rgb_l1: 0.0
+  perceptual: 0.0
+  temporal: 0.0
+
+tracking:
+  wandb_entity: aayush21003-indraprastha-institute-of-information-techno
+  wandb_project: factorjepa-cosmos-latent-adapter
+  log_every_steps: 10
+  log_validation_videos: true
+
+huggingface:
+  repo_id: Aaypom/factorjepa-cosmos-future-adapter
+  private: false
+  push_best: true
+  push_latest: true

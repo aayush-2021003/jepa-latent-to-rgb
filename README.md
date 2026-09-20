@@ -121,6 +121,13 @@ src/
 └── utils/           # Config, bootstrap CI, gpu_batch, wandb
 ```
 
+### Future-latent RGB visualization experiment
+
+The frozen FactorJEPA future-token to Cosmos continuous-latent adapter lives in
+[`experiments/jepa_cosmos`](experiments/jepa_cosmos/README.md). Its runbook covers
+efficient 5K/10K DenseWorld preparation, frozen-latent caching, adapter training,
+W&B validation logging, Hugging Face checkpoint publishing, and RGB inference.
+
 ---
 
 ## Authors

@@ -67,6 +67,12 @@ peft>=0.13.0
 # Experiment Tracking
 # =============================================================================
 wandb>=0.15.0
+lpips>=0.1.4
+imageio-ffmpeg>=0.4.9
+
+# Continuous video encoder/decoder used by experiments/jepa_cosmos.
+# The official repository is archived, so pin the final main commit exactly.
+cosmos-tokenizer @ git+https://github.com/NVIDIA/Cosmos-Tokenizer.git@3584ae752ce8ebdbe06a420bf60d7513c0e878cc
 
 # =============================================================================
 # cuML GPU (UMAP, DBSCAN, etc.) - Nvidia GPU ONLY
