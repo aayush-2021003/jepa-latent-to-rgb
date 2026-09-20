@@ -18,8 +18,14 @@ from experiments.jepa_cosmos.tracking import log_file_artifact, start_wandb
 
 def materialize_cached_file(cached: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists():
+    if destination.is_file():
         return
+    # hf_hub_download commonly returns a relative symlink inside the HF cache.
+    # Hard-linking that symlink itself into checkpoints/ makes its relative target
+    # invalid, so always resolve it to the underlying blob first.
+    cached = cached.resolve(strict=True)
+    if destination.is_symlink():
+        destination.unlink()
     temporary = destination.with_suffix(f".tmp{os.getpid()}{destination.suffix}")
     try:
         os.link(cached, temporary)
@@ -92,4 +98,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
