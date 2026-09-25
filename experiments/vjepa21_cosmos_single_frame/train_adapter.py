@@ -56,7 +56,7 @@ def enable_overfit_mode(config: dict) -> dict:
             "batch_size": 1,
             "gradient_accumulation_steps": 1,
             "learning_rate": float(mode.get("learning_rate", 1.0e-3)),
-            "min_learning_rate": float(mode.get("min_learning_rate", 1.0e-5)),
+            "scheduler": "none",
             "validate_every_optimizer_steps": int(
                 mode.get("validate_every_optimizer_steps", 50)
             ),
@@ -83,7 +83,7 @@ def save_checkpoint(
         {
             "adapter": adapter.state_dict(),
             "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
+            "scheduler": scheduler.state_dict() if scheduler is not None else None,
             "epoch": epoch,
             "global_step": global_step,
             "optimizer_step": optimizer_step,
@@ -318,11 +318,17 @@ def main() -> None:
         / int(train_cfg["batch_size"])
         / int(train_cfg["gradient_accumulation_steps"])
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=max(1, optimizer_steps_per_epoch * int(train_cfg["epochs"])),
-        eta_min=float(train_cfg["min_learning_rate"]),
-    )
+    scheduler_name = train_cfg.get("scheduler", "cosine")
+    if scheduler_name == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, optimizer_steps_per_epoch * int(train_cfg["epochs"])),
+            eta_min=float(train_cfg["min_learning_rate"]),
+        )
+    elif scheduler_name == "none":
+        scheduler = None
+    else:
+        raise ValueError("training.scheduler must be 'cosine' or 'none'")
     precision = dtype_from_name(train_cfg["mixed_precision"])
     latest_path = output_dir / "adapter_latest.pt"
     best_path = output_dir / "adapter_best.pt"
@@ -332,7 +338,8 @@ def main() -> None:
         state = torch.load(latest_path, map_location="cpu", weights_only=False)
         adapter.load_state_dict(state["adapter"])
         optimizer.load_state_dict(state["optimizer"])
-        scheduler.load_state_dict(state["scheduler"])
+        if scheduler is not None and state.get("scheduler") is not None:
+            scheduler.load_state_dict(state["scheduler"])
         start_epoch = int(state["epoch"]) + 1
         global_step = int(state["global_step"])
         optimizer_step = int(state["optimizer_step"])
@@ -384,7 +391,8 @@ def main() -> None:
                 torch.nn.utils.clip_grad_norm_(adapter.parameters(), float(train_cfg["max_grad_norm"]))
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
-                scheduler.step()
+                if scheduler is not None:
+                    scheduler.step()
                 optimizer_step += 1
             samples += batch_size
             epoch_loss += float(loss.detach()) * batch_size
@@ -494,6 +502,7 @@ def main() -> None:
         "context_frames": 14,
         "predicted_tubelet_frames": [15, 16],
         "supervised_frame": 15,
+        "scheduler": scheduler_name,
         "best_validation_predicted_loss": best_metric,
         "epochs_completed": completed_epochs,
         "global_step": global_step,

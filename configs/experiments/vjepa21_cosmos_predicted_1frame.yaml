@@ -61,6 +61,7 @@ training:
   epochs: 20
   learning_rate: 0.0002
   min_learning_rate: 0.000002
+  scheduler: cosine
   weight_decay: 0.01
   max_grad_norm: 1.0
   num_workers: 2
@@ -72,7 +73,7 @@ overfit:
   samples: 1
   epochs: 3000
   learning_rate: 0.001
-  min_learning_rate: 0.00001
+  scheduler: none
   validate_every_optimizer_steps: 50
   push_to_huggingface: false
 

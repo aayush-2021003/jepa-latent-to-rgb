@@ -92,9 +92,10 @@ bash scripts/run_vjepa21_cosmos_single_frame.sh train "$CONFIG" \
 
 The overfit output is isolated under
 `outputs/vjepa21_cosmos_predicted_1frame/overfit`. It uses one fixed validation
-sample, batch size 1, no gradient accumulation, learning rate `1e-3`, 3,000
-optimizer steps, and validation with one labeled comparison image every 50
-steps. Overfit checkpoints are not uploaded to Hugging Face.
+sample, batch size 1, no gradient accumulation, a constant learning rate of
+`1e-3` with no scheduler, 3,000 optimizer steps, and validation with one
+labeled comparison image every 50 steps. Overfit checkpoints are not uploaded
+to Hugging Face. The full 5K run continues to use cosine learning-rate decay.
 
 For an unattended overfit run:
 
