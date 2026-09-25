@@ -1,4 +1,4 @@
-"""Reuse the source-disjoint DenseWorld 5K downloader."""
+"""Reuse the source-disjoint DenseWorld 5K/10K downloader."""
 from experiments.jepa_cosmos import download_denseworld as implementation
 from experiments.vjepa21_cosmos_single_frame.common import load_config
 

@@ -75,6 +75,35 @@ images are logged at each step-based validation. The best checkpoint is selected
 by predicted latent loss. Latest and best adapters are uploaded to
 `Aaypom/vjepa21-cosmos-ci-predicted-1frame-adapter`.
 
+## 10K predicted-latent run
+
+Use the isolated 10K config:
+
+```bash
+CONFIG=configs/experiments/vjepa21_cosmos_predicted_1frame_10k.yaml
+
+bash scripts/run_vjepa21_cosmos_single_frame.sh validate "$CONFIG"
+bash scripts/run_vjepa21_cosmos_single_frame.sh assets "$CONFIG"
+bash scripts/run_vjepa21_cosmos_single_frame.sh data "$CONFIG"
+bash scripts/run_vjepa21_cosmos_single_frame.sh cache "$CONFIG"
+bash scripts/run_vjepa21_cosmos_single_frame.sh validate "$CONFIG" \
+  --require-assets --require-cache --online
+bash scripts/run_vjepa21_cosmos_single_frame.sh train "$CONFIG"
+```
+
+This config uses 9,500 training clips plus a source-disjoint 500-clip
+validation set. It retains 20 epochs, physical batch size 2, gradient
+accumulation 8 (effective batch 16), and validation every 150 optimizer steps.
+Its dataset, latent cache, outputs, W&B run name, and Hugging Face repository
+are separate from the 5K and overfit runs.
+
+At every validation event, each of the eight W&B previews is a five-column
+MP4. The first column plays the exact observed context frames 1-14. The other
+columns hold frame 15 ground truth, the Cosmos-CI reconstruction ceiling, the
+true-JEPA adapter output, and the predicted-JEPA adapter output. The cached
+14-frame RGB context is stored only for these eight previews, not all 500
+validation samples.
+
 ## One-sample overfit diagnostic
 
 For an overfit-only smoke test on a fresh machine, cache only validation data:

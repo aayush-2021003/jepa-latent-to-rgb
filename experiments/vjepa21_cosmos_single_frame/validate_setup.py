@@ -43,6 +43,12 @@ def cache_status(config: dict, required: bool) -> dict:
             raise RuntimeError("Validation cache lacks oracle V-JEPA features")
         if split == "val" and metadata.get("contains_target_rgb") is not True:
             raise RuntimeError("Validation cache lacks frame-15 RGB targets")
+        if (
+            split == "val"
+            and config["tracking"].get("log_context_panel", False)
+            and metadata.get("preview_contains_context_rgb") is not True
+        ):
+            raise RuntimeError("Validation cache lacks 14-frame RGB context previews")
         missing = [
             row["file"]
             for row in manifest["shards"]
@@ -50,6 +56,13 @@ def cache_status(config: dict, required: bool) -> dict:
         ]
         if missing:
             raise FileNotFoundError(f"Missing {split} cache shards: {missing[:3]}")
+        if split == "val" and config["tracking"].get("log_context_panel", False):
+            preview_path = manifest_path.parent / "preview.pt"
+            if not preview_path.is_file():
+                raise FileNotFoundError(preview_path)
+            preview = torch.load(preview_path, map_location="cpu", weights_only=False)
+            if not preview or any("context_rgb" not in sample for sample in preview):
+                raise RuntimeError("Validation preview cache lacks 14-frame RGB context")
         result[split] = manifest["samples"]
     return result
 

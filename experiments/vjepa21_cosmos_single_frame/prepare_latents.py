@@ -145,6 +145,8 @@ def prepare_split(split: str, config: dict, world, cosmos, run) -> None:
         "contains_target_rgb": include_validation,
         "cosmos_target_schema": "continuous_image_frame15_v1",
     }
+    if include_validation and config["tracking"].get("log_context_panel", False):
+        metadata["preview_contains_context_rgb"] = True
     cache_root = project_path(data["cache_root"]) / split
     writer = CacheWriter(cache_root, data["cache_samples_per_shard"], metadata)
     remaining = set(keys) - writer.processed
@@ -201,7 +203,11 @@ def prepare_split(split: str, config: dict, world, cosmos, run) -> None:
                 sample["target_rgb"] = target_rgb.cpu()
             writer.add(sample)
             if include_validation and len(preview) < data["preview_samples"] and key not in preview_keys:
-                preview.append(sample)
+                preview_sample = dict(sample)
+                if config["tracking"].get("log_context_panel", False):
+                    # Store RGB context only for the small preview set.
+                    preview_sample["context_rgb"] = cropped[:context_end].cpu()
+                preview.append(preview_sample)
                 preview_keys.add(key)
                 atomic_torch_save(preview, preview_path)
             progress.update(1)

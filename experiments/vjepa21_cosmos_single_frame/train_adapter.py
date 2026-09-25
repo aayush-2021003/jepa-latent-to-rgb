@@ -22,7 +22,10 @@ from experiments.vjepa21_cosmos_single_frame.common import (
     seed_everything,
 )
 from experiments.vjepa21_cosmos_single_frame.data import LatentShardDataset, cache_collate
-from experiments.vjepa21_cosmos_single_frame.media import save_comparison
+from experiments.vjepa21_cosmos_single_frame.media import (
+    save_comparison,
+    save_context_comparison_video,
+)
 from experiments.vjepa21_cosmos_single_frame.models import (
     CosmosContinuousImageTokenizer,
     validate_model_geometry,
@@ -183,8 +186,14 @@ def render_previews(adapter, decoder, config, output_dir: Path) -> list[Path]:
         previews = previews[:1]
     device = next(adapter.parameters()).device
     precision = dtype_from_name(config["training"]["mixed_precision"])
+    include_context = bool(config["tracking"].get("log_context_panel", False))
     paths = []
     for index, sample in enumerate(previews):
+        if include_context and "context_rgb" not in sample:
+            raise RuntimeError(
+                "Validation preview cache lacks context_rgb. Rebuild the validation "
+                "cache with the current code before training."
+            )
         target = sample["cosmos_target"].unsqueeze(0).to(device)
         target_shape = tuple(target.shape[-2:])
         with torch.autocast("cuda", dtype=precision):
@@ -204,7 +213,20 @@ def render_previews(adapter, decoder, config, output_dir: Path) -> list[Path]:
             oracle,
             prediction,
         )
-        paths.append(path)
+        if include_context:
+            video_path = output_dir / "validation_videos" / f"sample_{index:02d}.mp4"
+            save_context_comparison_video(
+                video_path,
+                sample["context_rgb"],
+                sample["target_rgb"],
+                reconstruction,
+                oracle,
+                prediction,
+                fps=int(config["tracking"].get("validation_media_fps", 4)),
+            )
+            paths.append(video_path)
+        else:
+            paths.append(path)
     return paths
 
 
@@ -226,7 +248,10 @@ def log_validation(run, record: dict, images: list[Path] | None = None) -> None:
 
         payload.update(
             {
-                f"validation/sample_{index:02d}": wandb.Image(str(path))
+                f"validation/sample_{index:02d}": (
+                    wandb.Video(str(path), format="mp4")
+                    if path.suffix == ".mp4" else wandb.Image(str(path))
+                )
                 for index, path in enumerate(images)
             }
         )
@@ -450,7 +475,8 @@ def main() -> None:
             atomic_json_dump(validation_history, validation_path)
             final_images = (
                 render_previews(adapter, decoder, config, output_dir)
-                if args.overfit and config["tracking"]["log_validation_media"]
+                if (args.overfit or config["tracking"].get("log_context_panel", False))
+                and config["tracking"]["log_validation_media"]
                 else None
             )
             log_validation(run, record, final_images)
