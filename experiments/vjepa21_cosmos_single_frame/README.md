@@ -77,7 +77,13 @@ by predicted latent loss. Latest and best adapters are uploaded to
 
 ## One-sample overfit diagnostic
 
-Run this before the 5K training if desired:
+For an overfit-only smoke test on a fresh machine, cache only validation data:
+
+```bash
+bash scripts/run_vjepa21_cosmos_single_frame.sh cache "$CONFIG" --split val
+```
+
+Then run the diagnostic:
 
 ```bash
 bash scripts/run_vjepa21_cosmos_single_frame.sh train "$CONFIG" \
@@ -85,7 +91,19 @@ bash scripts/run_vjepa21_cosmos_single_frame.sh train "$CONFIG" \
 ```
 
 The overfit output is isolated under
-`outputs/vjepa21_cosmos_predicted_1frame/overfit`.
+`outputs/vjepa21_cosmos_predicted_1frame/overfit`. It uses one fixed validation
+sample, batch size 1, no gradient accumulation, learning rate `1e-3`, 3,000
+optimizer steps, and validation with one labeled comparison image every 50
+steps. Overfit checkpoints are not uploaded to Hugging Face.
+
+For an unattended overfit run:
+
+```bash
+nohup bash scripts/run_vjepa21_cosmos_single_frame.sh train "$CONFIG" \
+  --overfit --no-hf-push \
+  > logs/vjepa21_cosmos_predicted_1frame_overfit.log 2>&1 &
+echo $! > logs/vjepa21_cosmos_predicted_1frame_overfit.pid
+```
 
 ## Inference
 

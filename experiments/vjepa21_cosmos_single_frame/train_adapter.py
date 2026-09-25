@@ -351,6 +351,7 @@ def main() -> None:
     validation_history = json.loads(validation_path.read_text()) if validation_path.exists() else []
     optimizer.zero_grad(set_to_none=True)
     loss_cfg = config["loss"]
+    completed_epochs = start_epoch
 
     for epoch in range(start_epoch, int(train_cfg["epochs"])):
         adapter.train()
@@ -424,7 +425,10 @@ def main() -> None:
                 adapter.train()
 
         train_loss = epoch_loss / samples
-        if last_validation_step != optimizer_step:
+        completed_epochs = epoch + 1
+        final_epoch = completed_epochs == int(train_cfg["epochs"])
+        validate_at_epoch_end = not args.overfit or final_epoch
+        if validate_at_epoch_end and last_validation_step != optimizer_step:
             validation = validate(adapter, val_loader, decoder, device, config)
             record = {
                 "epoch": epoch + 1,
@@ -436,13 +440,23 @@ def main() -> None:
             }
             validation_history.append(record)
             atomic_json_dump(validation_history, validation_path)
-            log_validation(run, record)
+            final_images = (
+                render_previews(adapter, decoder, config, output_dir)
+                if args.overfit and config["tracking"]["log_validation_media"]
+                else None
+            )
+            log_validation(run, record, final_images)
             if validation["predicted_loss"] < best_metric:
                 best_metric = validation["predicted_loss"]
                 best_updated = True
                 best_record = {**record, "best_metric": best_metric}
                 save_checkpoint(best_path, adapter, optimizer, scheduler, epoch, global_step, optimizer_step, best_metric, config)
-        assert validation is not None
+        # In one-sample overfit mode, one epoch equals one optimizer step. Do not
+        # let the generic epoch-end path turn a 50-step interval into validation
+        # after every step. Checkpoint/history rows are emitted at validation
+        # events (and the final step) only.
+        if validation is None:
+            continue
         history.append(
             {
                 "epoch": epoch + 1,
@@ -481,7 +495,7 @@ def main() -> None:
         "predicted_tubelet_frames": [15, 16],
         "supervised_frame": 15,
         "best_validation_predicted_loss": best_metric,
-        "epochs_completed": len(history),
+        "epochs_completed": completed_epochs,
         "global_step": global_step,
         "optimizer_step": optimizer_step,
         "best_checkpoint": str(best_path),
