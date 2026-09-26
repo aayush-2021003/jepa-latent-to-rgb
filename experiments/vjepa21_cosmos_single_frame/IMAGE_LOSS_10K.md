@@ -42,7 +42,8 @@ around 14 GB; allow additional space for the environment, Cosmos weights,
 checkpoints, and download overhead. These are planning estimates, not a measured peak; the frozen
 decoder is backpropagated through for image losses. `batch_size: 2` and
 `gradient_accumulation_steps: 8` make effective batch 16. Training is 20
-epochs, roughly 563 optimizer steps/epoch, with validation every 150 steps.
+epochs, roughly 563 optimizer steps/epoch, with validation every 300 steps
+and at epoch end.
 
 ```bash
 git clone -b cosmos-latent-adapter https://github.com/aayush-2021003/jepa-latent-to-rgb.git
