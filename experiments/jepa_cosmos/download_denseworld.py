@@ -152,6 +152,58 @@ def select_source_disjoint(
     return train, validation
 
 
+def select_three_way_source_disjoint(
+    records: list[Record], train_samples: int, val_samples: int,
+    test_samples: int, eval_source_groups: int, seed: int,
+) -> dict[str, list[Record]]:
+    """Reserve many entire source videos for each evaluation split.
+
+    Evaluation clips are drawn round-robin across reserved videos so that the
+    reported metrics are not dominated by a handful of near-duplicate clips.
+    """
+    if eval_source_groups < 1 or min(train_samples, val_samples, test_samples) < 1:
+        raise ValueError("Three-way split counts and eval_source_groups must be positive")
+    if min(val_samples, test_samples) < eval_source_groups:
+        raise ValueError("Evaluation sample counts must be >= eval_source_groups")
+    by_source: dict[str, list[Record]] = {}
+    for record in records:
+        by_source.setdefault(record.source_group, []).append(record)
+    groups = sorted(by_source)
+    rng = random.Random(seed)
+    rng.shuffle(groups)
+    if len(groups) < 2 * eval_source_groups + 1:
+        raise RuntimeError("Too few distinct source videos; increase data.download_margin_shards")
+    reserved = {
+        "val": groups[:eval_source_groups],
+        "test": groups[eval_source_groups:2 * eval_source_groups],
+    }
+    result: dict[str, list[Record]] = {}
+    for split, count in (("val", val_samples), ("test", test_samples)):
+        queues = []
+        for group in reserved[split]:
+            clips = by_source[group].copy()
+            rng.shuffle(clips)
+            queues.append(clips)
+        selected: list[Record] = []
+        while len(selected) < count and any(queues):
+            for queue in queues:
+                if queue and len(selected) < count:
+                    selected.append(queue.pop())
+        if len(selected) != count or len({row.source_group for row in selected}) < eval_source_groups:
+            raise RuntimeError(f"Insufficient {split} clips from reserved source videos; download more shards")
+        result[split] = selected
+    train_groups = set(groups[2 * eval_source_groups:])
+    train_pool = [row for row in records if row.source_group in train_groups]
+    rng.shuffle(train_pool)
+    if len(train_pool) < train_samples:
+        raise RuntimeError(
+            f"Only {len(train_pool)} train clips remain after source-disjoint eval reservations; "
+            "increase data.download_margin_shards"
+        )
+    result["train"] = train_pool[:train_samples]
+    return result
+
+
 def repack(
     split_records: dict[str, list[Record]],
     roots: dict[str, Path],
@@ -235,7 +287,8 @@ def main() -> None:
     if not remote_tars:
         raise RuntimeError("No TAR shards found in the DenseWorld archive")
 
-    total_samples = data_cfg["train_samples"] + data_cfg["val_samples"]
+    test_samples = int(data_cfg.get("test_samples", 0))
+    total_samples = data_cfg["train_samples"] + data_cfg["val_samples"] + test_samples
     required_shards = math.ceil(total_samples / data_cfg["clips_per_remote_shard"])
     download_count = required_shards + data_cfg["download_margin_shards"]
     selected_shards = choose_spread_shards(
@@ -245,8 +298,9 @@ def main() -> None:
     existing_summary = local_root / "dataset_summary.json"
     if existing_summary.is_file():
         prepared = json.loads(existing_summary.read_text())
-        expected = (data_cfg["train_samples"], data_cfg["val_samples"])
-        found = (prepared["train"]["n"], prepared["val"]["n"])
+        split_names = ("train", "val", "test") if test_samples else ("train", "val")
+        expected = tuple(int(data_cfg[f"{split}_samples"]) for split in split_names)
+        found = tuple(prepared[split]["n"] for split in split_names)
         if found != expected:
             raise RuntimeError(
                 f"Existing dataset at {local_root} has train/val={found}, requested={expected}. "
@@ -277,15 +331,20 @@ def main() -> None:
     if len(clip_keys) != len(set(clip_keys)):
         raise RuntimeError("Duplicate clip keys were found across the selected DenseWorld shards")
 
-    train, validation = select_source_disjoint(
-        records,
-        data_cfg["train_samples"],
-        data_cfg["val_samples"],
-        config["experiment"]["seed"],
-    )
-    roots = {"train": local_root / "train", "val": local_root / "val"}
+    if test_samples:
+        splits = select_three_way_source_disjoint(
+            records, data_cfg["train_samples"], data_cfg["val_samples"],
+            test_samples, int(data_cfg["eval_source_groups"]), config["experiment"]["seed"],
+        )
+    else:
+        train, validation = select_source_disjoint(
+            records, data_cfg["train_samples"], data_cfg["val_samples"],
+            config["experiment"]["seed"],
+        )
+        splits = {"train": train, "val": validation}
+    roots = {split: local_root / split for split in splits}
     manifests = repack(
-        {"train": train, "val": validation},
+        splits,
         roots,
         data_cfg["local_shard_size"],
     )
@@ -294,8 +353,7 @@ def main() -> None:
         "remote_shards_total": len(remote_tars),
         "remote_shards_downloaded": selected_shards,
         "candidates_scanned": len(records),
-        "train": manifests["train"],
-        "val": manifests["val"],
+        **manifests,
         "source_overlap": 0,
     }
     summary_path = local_root / "dataset_summary.json"
@@ -303,11 +361,10 @@ def main() -> None:
     if run is not None:
         run.log(
             {
-                "dataset/train_samples": len(train),
-                "dataset/val_samples": len(validation),
+                **{f"dataset/{split}_samples": len(rows) for split, rows in splits.items()},
                 "dataset/remote_shards_downloaded": len(selected_shards),
                 "dataset/train_source_videos": manifests["train"]["source_videos"],
-                "dataset/val_source_videos": manifests["val"]["source_videos"],
+                **{f"dataset/{split}_source_videos": manifest["source_videos"] for split, manifest in manifests.items()},
                 "dataset/source_overlap": 0,
             }
         )

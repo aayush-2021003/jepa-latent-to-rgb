@@ -87,7 +87,7 @@ class CacheWriter:
                 [sample["cosmos_target"] for sample in self.buffer]
             ),
         }
-        for optional in ("jepa_target", "target_rgb"):
+        for optional in ("jepa_target", "target_rgb", "previous_rgb"):
             if optional in self.buffer[0]:
                 payload[optional] = torch.stack(
                     [sample[optional] for sample in self.buffer]
@@ -125,7 +125,8 @@ def prepare_split(split: str, config: dict, world, cosmos, run) -> None:
     data = config["data"]
     local_root = project_path(data["local_root"]) / split
     keys = load_keys(local_root / f"{split}.json")
-    include_validation = split == "val"
+    include_evaluation = split in ("val", "test")
+    include_target_rgb = include_evaluation or bool(data.get("cache_train_rgb", False))
     target_index = int(data["context_frames"]) + int(data["target_frame_offset"])
     metadata = {
         "schema": CACHE_SCHEMA,
@@ -141,11 +142,12 @@ def prepare_split(split: str, config: dict, world, cosmos, run) -> None:
         "crop_size": data["crop_size"],
         "input_dim": config["adapter"]["input_dim"],
         "contains_jepa_predicted": True,
-        "contains_jepa_target": include_validation,
-        "contains_target_rgb": include_validation,
+        "contains_jepa_target": include_evaluation,
+        "contains_target_rgb": include_target_rgb,
+        "contains_previous_rgb": include_evaluation and bool(data.get("cache_previous_rgb", False)),
         "cosmos_target_schema": "continuous_image_frame15_v1",
     }
-    if include_validation and config["tracking"].get("log_context_panel", False):
+    if include_evaluation and config["tracking"].get("log_context_panel", False):
         metadata["preview_contains_context_rgb"] = True
     cache_root = project_path(data["cache_root"]) / split
     writer = CacheWriter(cache_root, data["cache_samples_per_shard"], metadata)
@@ -198,11 +200,14 @@ def prepare_split(split: str, config: dict, world, cosmos, run) -> None:
                 "jepa_predicted": predicted,
                 "cosmos_target": cosmos_target,
             }
-            if include_validation:
+            if include_evaluation:
                 sample["jepa_target"] = world.target_future(normalized)[0].cpu().half()
+            if include_target_rgb:
                 sample["target_rgb"] = target_rgb.cpu()
+            if include_evaluation and data.get("cache_previous_rgb", False):
+                sample["previous_rgb"] = cropped[context_end - 1].cpu()
             writer.add(sample)
-            if include_validation and len(preview) < data["preview_samples"] and key not in preview_keys:
+            if include_evaluation and len(preview) < data["preview_samples"] and key not in preview_keys:
                 preview_sample = dict(sample)
                 if config["tracking"].get("log_context_panel", False):
                     # Store RGB context only for the small preview set.
@@ -252,7 +257,7 @@ def prepare_split(split: str, config: dict, world, cosmos, run) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--split", choices=("train", "val", "all"), default="all")
+    parser.add_argument("--split", choices=("train", "val", "test", "all"), default="all")
     parser.add_argument("--no-wandb", action="store_true")
     args = parser.parse_args()
     config = load_config(args.config)
@@ -266,7 +271,7 @@ def main() -> None:
         )
     world = OfficialVJEPA21WorldModel(config, device)
     cosmos = CosmosContinuousImageTokenizer(config, device, True, False)
-    splits = ("train", "val") if args.split == "all" else (args.split,)
+    splits = (("train", "val", "test") if int(config["data"].get("test_samples", 0)) else ("train", "val")) if args.split == "all" else (args.split,)
     for split in splits:
         prepare_split(split, config, world, cosmos, run)
     if run is not None:

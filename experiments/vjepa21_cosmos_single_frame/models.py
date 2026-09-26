@@ -48,7 +48,6 @@ class CosmosContinuousImageTokenizer:
             raise RuntimeError(f"Unexpected Cosmos-CI latent shape: {tuple(output.shape)}")
         return output
 
-    @torch.no_grad()
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         if latent.ndim != 4:
             raise ValueError(f"Expected latent shape (B,C,H,W), got {tuple(latent.shape)}")

@@ -68,7 +68,7 @@ class LatentShardDataset(IterableDataset):
                     "jepa_predicted": payload["jepa_predicted"][sample_index],
                     "cosmos_target": payload["cosmos_target"][sample_index],
                 }
-                for optional in ("jepa_target", "target_rgb"):
+                for optional in ("jepa_target", "target_rgb", "previous_rgb"):
                     if optional in payload:
                         sample[optional] = payload[optional][sample_index]
                 yielded += 1
@@ -81,7 +81,7 @@ def cache_collate(samples: list[dict]) -> dict:
         "jepa_predicted": torch.stack([sample["jepa_predicted"] for sample in samples]),
         "cosmos_target": torch.stack([sample["cosmos_target"] for sample in samples]),
     }
-    for optional in ("jepa_target", "target_rgb"):
+    for optional in ("jepa_target", "target_rgb", "previous_rgb"):
         if optional in samples[0]:
             result[optional] = torch.stack([sample[optional] for sample in samples])
     return result

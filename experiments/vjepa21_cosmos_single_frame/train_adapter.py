@@ -177,8 +177,8 @@ def validate(adapter, loader, decoder, device, config) -> dict[str, float]:
 
 
 @torch.no_grad()
-def render_previews(adapter, decoder, config, output_dir: Path) -> list[Path]:
-    preview_path = project_path(config["data"]["cache_root"]) / "val" / "preview.pt"
+def render_previews(adapter, decoder, config, output_dir: Path, split: str = "val") -> list[Path]:
+    preview_path = project_path(config["data"]["cache_root"]) / split / "preview.pt"
     if not preview_path.is_file():
         raise FileNotFoundError(f"Validation preview cache not found: {preview_path}")
     previews = torch.load(preview_path, map_location="cpu", weights_only=False)
@@ -204,7 +204,7 @@ def render_previews(adapter, decoder, config, output_dir: Path) -> list[Path]:
         reconstruction = decoder.decode(target)[0]
         oracle = decoder.decode(oracle_latent)[0]
         prediction = decoder.decode(predicted_latent)[0]
-        path = output_dir / "validation_images" / f"sample_{index:02d}.png"
+        path = output_dir / f"{split}_images" / f"sample_{index:02d}.png"
         save_comparison(
             path,
             sample["key"],
@@ -214,7 +214,7 @@ def render_previews(adapter, decoder, config, output_dir: Path) -> list[Path]:
             prediction,
         )
         if include_context:
-            video_path = output_dir / "validation_videos" / f"sample_{index:02d}.mp4"
+            video_path = output_dir / f"{split}_videos" / f"sample_{index:02d}.mp4"
             save_context_comparison_video(
                 video_path,
                 sample["context_rgb"],

@@ -15,12 +15,40 @@ from experiments.vjepa21_cosmos_single_frame.data import CACHE_SCHEMA
 from experiments.vjepa21_cosmos_single_frame.models import validate_model_geometry
 
 
+def dataset_status(config: dict) -> dict:
+    report = validate_local_dataset(config)
+    if not int(config["data"].get("test_samples", 0)):
+        return report
+    root = project_path(config["data"]["local_root"])
+    sources = {}
+    for split in ("train", "val", "test"):
+        path = root / split / f"{split}.json"
+        if not path.is_file():
+            report[split] = "not prepared"
+            continue
+        keys = json.loads(path.read_text())["clip_keys"]
+        if len(keys) != int(config["data"][f"{split}_samples"]):
+            raise RuntimeError(f"{split} clip count mismatch")
+        sources[split] = {key.split("/")[1][:11] for key in keys}
+        report[split] = {"samples": len(keys), "source_videos": len(sources[split])}
+    if len(sources) == 3:
+        for a, b in (("train", "val"), ("train", "test"), ("val", "test")):
+            if sources[a] & sources[b]:
+                raise RuntimeError(f"Source-video overlap between {a} and {b}")
+        minimum = int(config["data"]["eval_source_groups"])
+        if min(len(sources["val"]), len(sources["test"])) < minimum:
+            raise RuntimeError("Evaluation splits have too few source videos")
+        report["source_overlap"] = 0
+    return report
+
+
 def cache_status(config: dict, required: bool) -> dict:
     result = {}
-    for split, expected in (
-        ("train", int(config["data"]["train_samples"])),
-        ("val", int(config["data"]["val_samples"])),
-    ):
+    split_counts = [("train", int(config["data"]["train_samples"])),
+                    ("val", int(config["data"]["val_samples"]))]
+    if int(config["data"].get("test_samples", 0)):
+        split_counts.append(("test", int(config["data"]["test_samples"])))
+    for split, expected in split_counts:
         manifest_path = project_path(config["data"]["cache_root"]) / split / "manifest.json"
         if not manifest_path.is_file():
             if required:
@@ -39,12 +67,14 @@ def cache_status(config: dict, required: bool) -> dict:
             raise RuntimeError(f"{split} cache lacks predicted V-JEPA features")
         if metadata.get("target_frame_number") != 15:
             raise RuntimeError(f"{split} cache does not target frame 15")
-        if split == "val" and metadata.get("contains_jepa_target") is not True:
-            raise RuntimeError("Validation cache lacks oracle V-JEPA features")
-        if split == "val" and metadata.get("contains_target_rgb") is not True:
-            raise RuntimeError("Validation cache lacks frame-15 RGB targets")
+        if split != "train" and metadata.get("contains_jepa_target") is not True:
+            raise RuntimeError(f"{split} cache lacks oracle V-JEPA features")
+        if (split != "train" or config["data"].get("cache_train_rgb", False)) and metadata.get("contains_target_rgb") is not True:
+            raise RuntimeError(f"{split} cache lacks frame-15 RGB targets")
+        if split != "train" and config["data"].get("cache_previous_rgb", False) and metadata.get("contains_previous_rgb") is not True:
+            raise RuntimeError(f"{split} cache lacks frame-14 persistence inputs")
         if (
-            split == "val"
+            split != "train"
             and config["tracking"].get("log_context_panel", False)
             and metadata.get("preview_contains_context_rgb") is not True
         ):
@@ -56,7 +86,7 @@ def cache_status(config: dict, required: bool) -> dict:
         ]
         if missing:
             raise FileNotFoundError(f"Missing {split} cache shards: {missing[:3]}")
-        if split == "val" and config["tracking"].get("log_context_panel", False):
+        if split != "train" and config["tracking"].get("log_context_panel", False):
             preview_path = manifest_path.parent / "preview.pt"
             if not preview_path.is_file():
                 raise FileNotFoundError(preview_path)
@@ -124,10 +154,12 @@ def main() -> None:
         "status": "ok",
         "task": "frames 1-14 -> predicted tubelet 15-16 -> Cosmos-CI latent of frame 15",
         "warning": "single-frame readout from a native two-frame V-JEPA prediction",
-        "training_loss": "frame15 latent_l1 + 0.1 * frame15 latent_cosine",
+        "training_loss": ("frame15 latent_l1 + 0.1 latent_cosine + RGB_MSE + 0.1 LPIPS"
+                          if float(config["loss"].get("rgb_mse", 0)) else
+                          "frame15 latent_l1 + 0.1 * frame15 latent_cosine"),
         "dependencies": dependencies,
         "assets": assets,
-        "dataset": validate_local_dataset(config),
+        "dataset": dataset_status(config),
         "cache": cache_status(config, args.require_cache),
         "adapter_parameters": sum(parameter.numel() for parameter in adapter.parameters()),
         "adapter_input_shape": list(dummy.shape),
