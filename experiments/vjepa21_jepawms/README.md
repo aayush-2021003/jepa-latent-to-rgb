@@ -125,3 +125,52 @@ therefore feeds two learned frame-specific heads; both outputs are supervised,
 while frame-16 LPIPS selects the best checkpoint. Always compare frame 16 against
 the last-context-frame copy baseline: otherwise a mostly static dataset can make
 immediate-future quality look deceptively strong.
+
+## Pretrained JEPA-WMs head on the current 10K frame-15 split (no training)
+
+The two-frame adapter above is **not** a matched baseline for the current
+Cosmos-CI frame-15 experiment: it uses a separate 5K split, supervises both
+frames, and trains another adapter. To inspect the *pretrained decoder head*
+on exactly the same cached V-JEPA 2.1 predictions and RGB targets as the
+10K Cosmos image-loss run, use the separate evaluator:
+
+```bash
+COSMOS_CONFIG=configs/experiments/vjepa21_cosmos_predicted_1frame_10k_image_loss.yaml
+HEAD_CONFIG=configs/experiments/vjepa21_jepawms_two_frame.yaml
+
+# Reuses the V-JEPA checkpoint; obtains the JEPA-WMs source and decoder weight.
+bash scripts/run_vjepa21_jepawms.sh assets "$HEAD_CONFIG"
+
+# Check that the 10K Cosmos cache exists (9K train / 500 val / 500 test).
+bash scripts/run_vjepa21_cosmos_single_frame.sh validate "$COSMOS_CONFIG" \
+  --require-cache
+
+# Small smoke test; separate output directory. Omit --no-wandb to log it.
+python -m experiments.vjepa21_jepawms.evaluate_pretrained_head \
+  --config "$COSMOS_CONFIG" --head-config "$HEAD_CONFIG" \
+  --split val --max-samples 8 --no-wandb \
+  --output-dir outputs/jepawms_pretrained_head_smoke
+
+# Complete validation first; use test only once the protocol is settled.
+python -m experiments.vjepa21_jepawms.evaluate_pretrained_head \
+  --config "$COSMOS_CONFIG" --head-config "$HEAD_CONFIG" --split val
+python -m experiments.vjepa21_jepawms.evaluate_pretrained_head \
+  --config "$COSMOS_CONFIG" --head-config "$HEAD_CONFIG" --split test
+```
+
+The evaluator consumes frame-15 `jepa_predicted`, `jepa_target`,
+`target_rgb`, and frame-14 `previous_rgb` from the Cosmos cache. It does **not**
+re-download videos, re-run V-JEPA, require a Cosmos adapter checkpoint, train
+an adapter, or create a Hugging Face checkpoint. It resizes the 24×24 feature
+grid to 16×16, the V-JEPA-2/256 geometry of the pretrained JEPA-WMs head,
+then scales the decoded image to the cached 384×384 target for matched RGB L1,
+MSE, PSNR, and LPIPS-Alex metrics. It reports oracle (true JEPA), predicted
+JEPA, and frame-14 persistence readouts for held-out frame 15.
+
+Outputs are under `outputs/vjepa21_jepawms_pretrained_head_frame15/{val,test}`:
+`summary.json`, `per_sample.csv`, and eight four-panel PNGs. Metrics and
+panels also go to a separate run in the Cosmos W&B project. This is a
+**zero-shot, cross-version diagnostic**, because the JEPA-WMs head was trained
+for V-JEPA-2, not V-JEPA 2.1. Poor quality alone would not establish that a
+capacity-matched JEPA-WMs head trained on the 9K DenseWorld examples is worse
+than the trained Cosmos adapter.

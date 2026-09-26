@@ -51,7 +51,18 @@ class CosmosContinuousImageTokenizer:
     def decode(self, latent: torch.Tensor) -> torch.Tensor:
         if latent.ndim != 4:
             raise ValueError(f"Expected latent shape (B,C,H,W), got {tuple(latent.shape)}")
-        output = self.model.decode(latent.to(self.device, dtype=self.dtype))
+        latent = latent.to(self.device, dtype=self.dtype)
+        if torch.is_grad_enabled() and latent.requires_grad:
+            # The upstream ImageTokenizer.decode method is decorated with
+            # @torch.no_grad(), which silently disconnects RGB/LPIPS losses.
+            # Call the frozen JIT module itself; the image-loss objective
+            # checks at runtime that its output remains differentiable.
+            decoder = self.model._dec_model
+            if decoder is None:
+                raise RuntimeError("Cosmos image decoder is not loaded")
+            output = decoder(latent)
+        else:
+            output = self.model.decode(latent)
         return output[0] if isinstance(output, tuple) else output
 
 
