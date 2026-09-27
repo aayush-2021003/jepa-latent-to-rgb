@@ -136,6 +136,22 @@ class ObjectiveTest(unittest.TestCase):
         self.assertEqual(len({c["tracking"]["run_name"] for c in configs}), 2)
         self.assertEqual(len({c["huggingface"]["repo_id"] for c in configs}), 2)
 
+    def test_75k_high_lr_mse_continuation_is_isolated_and_compatible(self):
+        base = load_config("configs/experiments/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse.yaml")
+        continuation = load_config(
+            "configs/experiments/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse_high_lr_continue.yaml"
+        )
+        for section in ("data", "vjepa21", "cosmos", "adapter"):
+            self.assertEqual(continuation[section], base[section])
+        self.assertEqual(continuation["training"]["init_adapter_repo_id"], base["huggingface"]["repo_id"])
+        self.assertEqual(continuation["loss"]["objective"], "latent_mse")
+        self.assertEqual(continuation["training"]["selection_metric"], "predicted_latent_mse")
+        self.assertEqual(continuation["training"]["epochs"], 5)
+        self.assertEqual(continuation["training"]["learning_rate"], 2e-4)
+        self.assertNotEqual(continuation["experiment"]["output_dir"], base["experiment"]["output_dir"])
+        self.assertNotEqual(continuation["tracking"]["run_name"], base["tracking"]["run_name"])
+        self.assertNotEqual(continuation["huggingface"]["repo_id"], base["huggingface"]["repo_id"])
+
     def test_warm_start_loads_only_compatible_adapter_weights(self):
         config = {
             "data": {"cache_root": "cache", "train_samples": 2, "val_samples": 1,
