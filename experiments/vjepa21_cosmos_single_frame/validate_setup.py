@@ -146,6 +146,10 @@ def main() -> None:
     }
     if args.require_assets and not all(assets.values()):
         raise RuntimeError(f"Missing required assets: {assets}")
+    source_checkpoint = config["training"].get("init_adapter_checkpoint")
+    source_path = project_path(source_checkpoint) if source_checkpoint else None
+    if args.require_assets and source_path is not None and not source_path.is_file():
+        raise FileNotFoundError(f"Warm-start adapter checkpoint not found: {source_path}")
     online = "not requested"
     if args.online:
         from huggingface_hub import HfApi
@@ -168,9 +172,15 @@ def main() -> None:
         "training_loss": (
             "frame15 latent MSE only"
             if config["loss"].get("objective") == "latent_mse" else
-            "frame15 latent_l1 + 0.1 latent_cosine + RGB_MSE + 0.1 LPIPS"
-            if float(config["loss"].get("rgb_mse", 0)) else
-            "frame15 latent_l1 + 0.1 * frame15 latent_cosine"
+            f"frame15 {config['loss']['latent_mse']} * latent MSE + "
+            f"{config['loss']['rgb_mse']} * RGB MSE + "
+            f"{config['loss']['perceptual']} * LPIPS"
+            if config["loss"].get("objective") == "latent_mse_rgb_lpips" else
+            "frame15 latent L1 + cosine + RGB MSE + LPIPS"
+        ),
+        "initial_adapter_checkpoint": (
+            {"path": str(source_path), "exists": source_path.is_file()}
+            if source_path is not None else None
         ),
         "dependencies": dependencies,
         "assets": assets,

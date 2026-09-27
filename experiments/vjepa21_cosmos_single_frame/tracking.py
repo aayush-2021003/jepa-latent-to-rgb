@@ -38,8 +38,15 @@ def push_checkpoint_to_hub(
         commit_message=f"Update {alias} validation metrics",
     )
     card = checkpoint.parent / "README_huggingface.md"
-    if config["loss"].get("objective") == "latent_mse":
+    objective = config["loss"].get("objective")
+    if objective == "latent_mse":
         loss_description = "latent MSE only. "
+    elif objective == "latent_mse_rgb_lpips":
+        loss_description = (
+            f"latent MSE ({config['loss']['latent_mse']}), "
+            f"RGB MSE ({config['loss']['rgb_mse']}) and "
+            f"LPIPS ({config['loss']['perceptual']}). "
+        )
     else:
         loss_description = (
             f"latent L1 ({config['loss']['latent_l1']}) plus cosine ({config['loss']['latent_cosine']}), "
@@ -59,6 +66,7 @@ def push_checkpoint_to_hub(
         "to V-JEPA's native two-frame tubelet size. Upstream weights are excluded.\n\n"
         f"- V-JEPA checkpoint: `{config['vjepa21']['checkpoint_url']}`\n"
         f"- Cosmos image tokenizer: `{config['cosmos']['model_id']}`\n"
+        f"- Initial adapter: `{config.get('training', {}).get('init_adapter_repo_id', 'not applicable')}`\n"
         f"- Metrics: `metrics/{alias}.json`\n"
     )
     api.upload_file(

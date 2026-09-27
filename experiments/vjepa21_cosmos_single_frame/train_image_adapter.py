@@ -45,12 +45,19 @@ def objective(prediction, target_latent, target_rgb, decoder, perceptual, config
     if mode == "latent_mse":
         latent_mse = F.mse_loss(prediction.float(), target_latent.float())
         return latent_mse, {"latent_mse": latent_mse}
-    if mode != "latent_l1_cosine_rgb_lpips":
+    if mode not in ("latent_l1_cosine_rgb_lpips", "latent_mse_rgb_lpips"):
         raise ValueError(f"Unsupported loss objective: {mode}")
-    latent_loss, parts = latent_alignment_loss(
-        prediction, target_latent,
-        float(loss_cfg["latent_l1"]), float(loss_cfg["latent_cosine"]),
-    )
+    if mode == "latent_mse_rgb_lpips":
+        weights = {name: float(loss_cfg[name]) for name in ("latent_mse", "rgb_mse", "perceptual")}
+        if any(not math.isfinite(weight) or weight < 0 for weight in weights.values()):
+            raise ValueError("Loss weights must be finite and nonnegative")
+        latent_loss = F.mse_loss(prediction.float(), target_latent.float())
+        parts = {"latent_mse": latent_loss}
+    else:
+        latent_loss, parts = latent_alignment_loss(
+            prediction, target_latent,
+            float(loss_cfg["latent_l1"]), float(loss_cfg["latent_cosine"]),
+        )
     decoded = decoder.decode(prediction)
     if torch.is_grad_enabled() and prediction.requires_grad and not decoded.requires_grad:
         raise RuntimeError("Cosmos decoder detached the adapter; RGB/LPIPS cannot train it")
@@ -59,9 +66,50 @@ def objective(prediction, target_latent, target_rgb, decoder, perceptual, config
     rgb_mse = F.mse_loss((decoded + 1.0) / 2.0, target_01)
     with torch.autocast("cuda", enabled=False):
         lpips_loss = perceptual(decoded.clamp(-1, 1), target_01 * 2.0 - 1.0).mean()
+    if mode == "latent_mse_rgb_lpips":
+        weighted = {
+            "weighted_latent_mse": weights["latent_mse"] * latent_loss,
+            "weighted_rgb_mse": weights["rgb_mse"] * rgb_mse,
+            "weighted_rgb_lpips": weights["perceptual"] * lpips_loss,
+        }
+        return sum(weighted.values()), {**parts, "rgb_mse": rgb_mse,
+                                         "rgb_lpips": lpips_loss, **weighted}
     total = (latent_loss + float(loss_cfg["rgb_mse"]) * rgb_mse
              + float(loss_cfg["perceptual"]) * lpips_loss)
     return total, {**parts, "rgb_mse": rgb_mse, "rgb_lpips": lpips_loss}
+
+
+def load_adapter_initialization(adapter, config: dict, checkpoint_path: Path) -> dict:
+    """Warm-start weights only; never inherit the source optimizer or scheduler."""
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Warm-start adapter checkpoint not found: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    if not isinstance(checkpoint, dict) or "adapter" not in checkpoint or "config" not in checkpoint:
+        raise ValueError("Warm-start checkpoint must contain adapter weights and its config")
+    source = checkpoint["config"]
+    if source.get("training", {}).get("input_latent") != "predicted":
+        raise ValueError("Warm-start checkpoint was not trained on predicted JEPA latents")
+    if source.get("loss", {}).get("objective") != "latent_mse":
+        raise ValueError("Expected a latent-MSE checkpoint for this fine-tuning experiment")
+    for section, keys in (
+        ("data", ("cache_root", "train_samples", "val_samples", "test_samples",
+                  "context_frames", "target_frame_offset", "crop_size")),
+        ("vjepa21", ("model_id", "embed_dim", "patch_size", "tubelet_size")),
+        ("cosmos", ("model_id", "latent_channels", "spatial_compression")),
+        ("adapter", ("input_dim", "hidden_dim", "output_channels", "residual_blocks")),
+    ):
+        for key in keys:
+            old = source.get(section, {}).get(key)
+            new = config[section][key]
+            if old != new:
+                raise ValueError(f"Warm-start checkpoint mismatch at {section}.{key}: {old!r} != {new!r}")
+    adapter.load_state_dict(checkpoint["adapter"], strict=True)
+    return {
+        "checkpoint": str(checkpoint_path),
+        "source_epoch": checkpoint.get("epoch"),
+        "source_optimizer_step": checkpoint.get("optimizer_step"),
+        "source_best_metric": checkpoint.get("best_metric"),
+    }
 
 
 def image_metrics(decoded, target_rgb, perceptual):
@@ -142,11 +190,11 @@ def plot_curves(history, output, selection_metric):
         return
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     epochs = [r["epoch"] for r in history]
-    axes[0].plot(epochs, [r["train_loss"] for r in history], label="Train loss")
+    axes[0].plot(epochs, [r["train_loss"] for r in history], label="Train total loss")
     selected_key = f"val_{selection_metric}"
-    if all(selected_key in row for row in history):
+    if selection_metric == "predicted_latent_mse" and all(selected_key in row for row in history):
         axes[0].plot(epochs, [row[selected_key] for row in history], label="Validation")
-    axes[0].set(xlabel="Epoch", ylabel=selection_metric)
+    axes[0].set(xlabel="Epoch", ylabel="Training objective")
     axes[0].legend()
     axes[1].plot([r["epoch"] for r in history], [r["val_predicted_rgb_lpips"] for r in history], label="Predicted")
     axes[1].plot([r["epoch"] for r in history], [r["val_persistence_rgb_lpips"] for r in history], label="Persistence")
@@ -169,7 +217,7 @@ def main():
     config = load_config(args.config)
     validate_model_geometry(config)
     if config["loss"].get("objective", "latent_l1_cosine_rgb_lpips") not in (
-        "latent_l1_cosine_rgb_lpips", "latent_mse"
+        "latent_l1_cosine_rgb_lpips", "latent_mse", "latent_mse_rgb_lpips"
     ):
         raise ValueError("Unknown loss objective")
     selection_metric = config["training"]["selection_metric"]
@@ -197,6 +245,7 @@ def main():
     best_path, latest_path = output / "adapter_best.pt", output / "adapter_latest.pt"
     start_epoch = global_step = optimizer_step = 0
     best_metric = float("inf")
+    initialization = None
     if train_cfg["resume"] and latest_path.is_file() and not args.test_only:
         checkpoint = torch.load(latest_path, map_location="cpu", weights_only=False)
         adapter.load_state_dict(checkpoint["adapter"])
@@ -206,12 +255,27 @@ def main():
         global_step = int(checkpoint["global_step"])
         optimizer_step = int(checkpoint["optimizer_step"])
         best_metric = float(checkpoint["best_metric"])
+    elif not args.test_only and train_cfg.get("init_adapter_checkpoint"):
+        if best_path.is_file() or latest_path.is_file():
+            raise RuntimeError(
+                f"Refusing to overwrite an existing run in {output}; use resume or a new output_dir"
+            )
+        source_path = project_path(train_cfg["init_adapter_checkpoint"])
+        if source_path.resolve() in (best_path.resolve(), latest_path.resolve()):
+            raise ValueError("Warm-start checkpoint must be outside the new run's checkpoint paths")
+        initialization = load_adapter_initialization(adapter, config, source_path)
+        atomic_json_dump(initialization, output / "initialization.json")
     run = None if args.no_wandb else start_wandb(config, "adapter-image-training", config["tracking"]["run_name"])
     if run:
         run.define_metric("optimizer_step")
         run.define_metric("validation/*", step_metric="optimizer_step")
         run.summary["checkpoint_selection_metric"] = selection_metric
         run.summary["hf_model_repo"] = f"https://huggingface.co/{config['huggingface']['repo_id']}"
+        if train_cfg.get("init_adapter_repo_id"):
+            run.summary["source_adapter_repo"] = f"https://huggingface.co/{train_cfg['init_adapter_repo_id']}"
+        if initialization:
+            run.summary["initial_adapter_checkpoint"] = initialization["checkpoint"]
+            run.summary["initial_adapter_optimizer_step"] = initialization["source_optimizer_step"]
     history_path, validation_path = output / "history.json", output / "validation_history.json"
     history = json.loads(history_path.read_text()) if history_path.exists() else []
     validation_history = json.loads(validation_path.read_text()) if validation_path.exists() else []
@@ -342,7 +406,8 @@ def main():
         run.log(payload, step=global_step)
         run.summary["test_predicted_rgb_lpips"] = test_metrics["predicted_rgb_lpips"]
         log_file_artifact(run, f"{config['experiment']['name']}-results", "results",
-                          [history_path, validation_path, report_path, curves])
+                          [history_path, validation_path, report_path, curves,
+                           output / "initialization.json"])
         run.finish()
     print(json.dumps(test_report, indent=2))
 

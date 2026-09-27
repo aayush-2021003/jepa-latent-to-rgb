@@ -1,0 +1,100 @@
+experiment:
+  name: vjepa21-cosmos-ci-predicted-single-frame-75k-drive-walk-mse-lpips-finetune
+  seed: 42
+  output_dir: outputs/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse_lpips_finetune
+
+data:
+  archive_repo: anonymousML123/denseworld-115k_archive
+  archive_prefix: data
+  clips_per_remote_shard: 1000
+  local_shard_size: 250
+  download_margin_shards: 28
+  allowed_tour_types: [walking, drive]
+  train_samples: 60000
+  val_samples: 7500
+  test_samples: 7500
+  eval_source_groups: 60
+  local_root: data/denseworld_75k_drive_walk
+  cache_root: data/vjepa21_cosmos_75k_drive_walk_frame15
+  cache_train_rgb: true
+  cache_previous_rgb: true
+  num_frames: 16
+  context_frames: 14
+  target_frame_offset: 0
+  crop_size: 384
+  preview_samples: 20
+  cache_samples_per_shard: 16
+  decode_workers: 8
+
+vjepa21:
+  model_id: facebookresearch/vjepa2:vjepa2_1_vit_giant_384
+  checkpoint_url: https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitg_384.pt
+  checkpoint_path: checkpoints/vjepa2_1_vitg_384.pt
+  encoder_checkpoint_key: target_encoder
+  dependency_root: deps/vjepa2
+  embed_dim: 1408
+  feature_levels: 4
+  use_final_layer_only: true
+  patch_size: 16
+  tubelet_size: 2
+  predictor_embed_dim: 384
+  predictor_depth: 24
+  predictor_heads: 12
+  predictor_mask_tokens: 8
+
+cosmos:
+  model_id: nvidia/Cosmos-0.1-Tokenizer-CI8x8
+  checkpoint_dir: checkpoints/Cosmos-0.1-Tokenizer-CI8x8
+  encoder_file: encoder.jit
+  decoder_file: decoder.jit
+  spatial_compression: 8
+  latent_channels: 16
+  dtype: bfloat16
+
+adapter:
+  input_dim: 1408
+  hidden_dim: 512
+  output_channels: 16
+  residual_blocks: 6
+  dropout: 0.0
+
+training:
+  input_latent: predicted
+  selection_metric: predicted_rgb_lpips
+  init_adapter_checkpoint: checkpoints/vjepa21_75k_mse_source/checkpoints/best.pt
+  init_adapter_repo_id: Aaypom/vjepa21-cosmos-ci-predicted-1frame-75k-drive-walk-mse-adapter
+  batch_size: 1
+  gradient_accumulation_steps: 16
+  epochs: 2
+  learning_rate: 0.00003
+  min_learning_rate: 0.000003
+  scheduler: cosine
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  num_workers: 2
+  mixed_precision: bfloat16
+  validate_every_optimizer_steps: 1000
+  resume: true
+
+loss:
+  objective: latent_mse_rgb_lpips
+  latent_mse: 1.0
+  rgb_mse: 5.0
+  perceptual: 2.0
+  perceptual_backbone: alex
+
+tracking:
+  wandb_entity: aayush21003-indraprastha-institute-of-information-techno
+  wandb_project: vjepa21-cosmos-latent-adapter
+  run_name: vjepa21-1b-cosmos-ci-predicted-1frame-75k-drive-walk-mse-lpips-finetune
+  log_every_steps: 10
+  log_validation_media: true
+  log_context_panel: true
+  validation_media_fps: 4
+
+huggingface:
+  repo_id: Aaypom/vjepa21-cosmos-ci-predicted-1frame-75k-drive-walk-mse-lpips-finetune-adapter
+  private: false
+  push_best: true
+  push_latest: true
+  push_every_epoch: true
