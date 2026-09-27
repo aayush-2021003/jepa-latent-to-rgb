@@ -17,8 +17,8 @@ is selected on the full validation split's **predicted frame-15 RGB LPIPS**;
 latent MSE, RGB MSE, PSNR, persistence, and Cosmos self-reconstruction remain
 diagnostics. Do not select or tune on the test split.
 
-The default fine-tune is 2 epochs, batch 1, accumulation 16 (effective 16),
-learning rate `3e-5` decaying to `3e-6`, and full validation at step 0,
+The default fine-tune is 2 epochs, batch 2, accumulation 8 (effective 16),
+learning rate `5e-5` decaying to `5e-6`, and full validation at step 0,
 every 1,000 optimizer steps, and epoch end if needed. The separate W&B run
 receives stepwise raw/weighted losses, validation metrics, 20 preview videos
 per validation, curves, and final test results. The separate HF model repo
@@ -58,6 +58,6 @@ The new local checkpoints and reports are under
 `outputs/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse_lpips_finetune`.
 The HF destination is
 `Aaypom/vjepa21-cosmos-ci-predicted-1frame-75k-drive-walk-mse-lpips-finetune-adapter`.
-If CUDA memory is tight, keep batch 1 and lower preview or validation
-frequency before changing the effective batch size. Backpropagating through
-the frozen Cosmos decoder is more memory-intensive than latent-MSE training.
+Backpropagating through the frozen Cosmos decoder is more memory-intensive
+than latent-MSE training. If batch 2 runs out of CUDA memory, use batch 1
+with accumulation 16 to preserve the effective batch size.

@@ -63,11 +63,11 @@ training:
   selection_metric: predicted_rgb_lpips
   init_adapter_checkpoint: checkpoints/vjepa21_75k_mse_source/checkpoints/best.pt
   init_adapter_repo_id: Aaypom/vjepa21-cosmos-ci-predicted-1frame-75k-drive-walk-mse-adapter
-  batch_size: 1
-  gradient_accumulation_steps: 16
+  batch_size: 2
+  gradient_accumulation_steps: 8
   epochs: 2
-  learning_rate: 0.00003
-  min_learning_rate: 0.000003
+  learning_rate: 0.00005
+  min_learning_rate: 0.000005
   scheduler: cosine
   weight_decay: 0.01
   max_grad_norm: 1.0
