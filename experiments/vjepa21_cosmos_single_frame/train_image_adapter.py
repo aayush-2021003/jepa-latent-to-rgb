@@ -29,12 +29,16 @@ from experiments.vjepa21_cosmos_single_frame.tracking import (
 )
 
 
-def make_perceptual_model(config: dict, device: torch.device):
+def make_perceptual_model(config: dict, device: torch.device, *, evaluation: bool = False):
     try:
         import lpips
     except ImportError as error:
         raise RuntimeError("Install lpips before using image-loss training") from error
-    model = lpips.LPIPS(net=config["loss"].get("perceptual_backbone", "alex"))
+    loss_cfg = config["loss"]
+    training_backbone = loss_cfg.get("perceptual_backbone", "alex")
+    backbone = (loss_cfg.get("evaluation_perceptual_backbone", training_backbone)
+                if evaluation else training_backbone)
+    model = lpips.LPIPS(net=backbone)
     return model.to(device).eval().requires_grad_(False)
 
 
@@ -238,6 +242,12 @@ def main():
     adapter = build_adapter(config).to(device)
     decoder = CosmosContinuousImageTokenizer(config, device, False, True)
     perceptual = make_perceptual_model(config, device)
+    training_backbone = config["loss"].get("perceptual_backbone", "alex")
+    evaluation_backbone = config["loss"].get("evaluation_perceptual_backbone", training_backbone)
+    evaluation_perceptual = (
+        make_perceptual_model(config, device, evaluation=True)
+        if evaluation_backbone != training_backbone else perceptual
+    )
     optimizer = torch.optim.AdamW(adapter.parameters(), lr=float(train_cfg["learning_rate"]), weight_decay=float(train_cfg["weight_decay"]))
     steps_per_epoch = math.ceil(len(train_loader.dataset) / train_cfg["batch_size"] / train_cfg["gradient_accumulation_steps"])
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, steps_per_epoch * train_cfg["epochs"]), eta_min=float(train_cfg["min_learning_rate"]))
@@ -270,6 +280,8 @@ def main():
         run.define_metric("optimizer_step")
         run.define_metric("validation/*", step_metric="optimizer_step")
         run.summary["checkpoint_selection_metric"] = selection_metric
+        run.summary["training_lpips_backbone"] = training_backbone
+        run.summary["evaluation_lpips_backbone"] = evaluation_backbone
         run.summary["hf_model_repo"] = f"https://huggingface.co/{config['huggingface']['repo_id']}"
         if train_cfg.get("init_adapter_repo_id"):
             run.summary["source_adapter_repo"] = f"https://huggingface.co/{train_cfg['init_adapter_repo_id']}"
@@ -287,7 +299,7 @@ def main():
 
     def check_validation(epoch, fraction, trigger):
         nonlocal best_metric, validation_static
-        metrics = evaluate(adapter, val_loader, decoder, perceptual, device, precision,
+        metrics = evaluate(adapter, val_loader, decoder, evaluation_perceptual, device, precision,
                            static_metrics=validation_static)
         if validation_static is None:
             validation_static = {key: value for key, value in metrics.items()
@@ -390,7 +402,7 @@ def main():
         raise FileNotFoundError(f"Best checkpoint unavailable for final test: {best_path}")
     best = torch.load(best_path, map_location="cpu", weights_only=False)
     adapter.load_state_dict(best["adapter"])
-    test_metrics = evaluate(adapter, test_loader, decoder, perceptual, device, precision)
+    test_metrics = evaluate(adapter, test_loader, decoder, evaluation_perceptual, device, precision)
     test_report = {"checkpoint": str(best_path), "selected_on": f"validation/{selection_metric}",
                    "best_validation_metric": float(best["best_metric"]), **test_metrics}
     report_path = output / "test_metrics.json"

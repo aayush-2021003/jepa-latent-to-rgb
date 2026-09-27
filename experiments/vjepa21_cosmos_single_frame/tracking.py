@@ -45,7 +45,8 @@ def push_checkpoint_to_hub(
         loss_description = (
             f"latent MSE ({config['loss']['latent_mse']}), "
             f"RGB MSE ({config['loss']['rgb_mse']}) and "
-            f"LPIPS ({config['loss']['perceptual']}). "
+            f"{config['loss'].get('perceptual_backbone', 'alex')}-LPIPS "
+            f"({config['loss']['perceptual']}). "
         )
     else:
         loss_description = (
@@ -62,6 +63,7 @@ def push_checkpoint_to_hub(
         "covering frames 15-16. This adapter reads that predicted tubelet and maps "
         "it to the frozen Cosmos-CI8x8 latent of frame 15 only. Training uses "
         f"{loss_description}"
+        f"Reported LPIPS uses the {config['loss'].get('evaluation_perceptual_backbone', config['loss'].get('perceptual_backbone', 'alex'))} backbone. "
         "This is a single-frame readout, not a change "
         "to V-JEPA's native two-frame tubelet size. Upstream weights are excluded.\n\n"
         f"- V-JEPA checkpoint: `{config['vjepa21']['checkpoint_url']}`\n"

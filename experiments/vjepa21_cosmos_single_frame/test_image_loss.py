@@ -12,6 +12,7 @@ from experiments.jepa_cosmos.download_denseworld import Record, select_three_way
 from experiments.vjepa21_cosmos_single_frame.train_image_adapter import (
     load_adapter_initialization, objective,
 )
+from experiments.vjepa21_cosmos_single_frame.common import load_config
 
 
 class ThreeWaySplitTest(unittest.TestCase):
@@ -91,6 +92,49 @@ class ObjectiveTest(unittest.TestCase):
         self.assertTrue(torch.allclose(parts["weighted_rgb_lpips"], 2 * parts["rgb_lpips"]))
         loss.backward()
         self.assertGreater(float(adapter.weight.grad.abs().sum()), 0)
+
+    def test_jepawms_style_zero_latent_weight_excludes_latent_supervision(self):
+        class Decoder:
+            def decode(self, latent):
+                return latent.repeat(1, 3, 1, 1)
+
+        class Perceptual(torch.nn.Module):
+            def forward(self, prediction, target):
+                return (prediction - target).abs().mean(dim=(1, 2, 3), keepdim=True)
+
+        prediction = torch.full((1, 1, 4, 4), 0.25, requires_grad=True)
+        rgb = torch.full((1, 3, 4, 4), 127, dtype=torch.uint8)
+        config = {"loss": {"objective": "latent_mse_rgb_lpips", "latent_mse": 0,
+                           "rgb_mse": 10, "perceptual": 1}}
+        first, parts = objective(prediction, torch.zeros_like(prediction), rgb,
+                                 Decoder(), Perceptual(), config)
+        second, _ = objective(prediction, torch.ones_like(prediction) * 100, rgb,
+                              Decoder(), Perceptual(), config)
+        self.assertTrue(torch.allclose(first, second))
+        self.assertTrue(torch.allclose(first, 10 * parts["rgb_mse"] + parts["rgb_lpips"]))
+        first.backward()
+        self.assertGreater(float(prediction.grad.abs().sum()), 0)
+
+    def test_75k_jepawms_configs_reuse_mse_split_and_source(self):
+        base = load_config("configs/experiments/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse.yaml")
+        configs = [load_config(path) for path in (
+            "configs/experiments/vjepa21_cosmos_predicted_1frame_75k_jepawms_rgb_lpips.yaml",
+            "configs/experiments/vjepa21_cosmos_predicted_1frame_75k_jepawms_rgb_lpips_latent_mse.yaml",
+        )]
+        for config in configs:
+            self.assertEqual(config["data"], base["data"])
+            self.assertEqual(config["vjepa21"], base["vjepa21"])
+            self.assertEqual(config["cosmos"], base["cosmos"])
+            self.assertEqual(config["adapter"], base["adapter"])
+            self.assertEqual(config["training"]["epochs"], 3)
+            self.assertEqual(config["loss"]["perceptual_backbone"], "vgg")
+            self.assertEqual(config["loss"]["evaluation_perceptual_backbone"], "alex")
+            self.assertEqual(config["training"]["init_adapter_repo_id"], base["huggingface"]["repo_id"])
+        self.assertEqual(configs[0]["loss"]["latent_mse"], 0)
+        self.assertGreater(configs[1]["loss"]["latent_mse"], 0)
+        self.assertEqual(len({c["experiment"]["output_dir"] for c in configs}), 2)
+        self.assertEqual(len({c["tracking"]["run_name"] for c in configs}), 2)
+        self.assertEqual(len({c["huggingface"]["repo_id"] for c in configs}), 2)
 
     def test_warm_start_loads_only_compatible_adapter_weights(self):
         config = {
