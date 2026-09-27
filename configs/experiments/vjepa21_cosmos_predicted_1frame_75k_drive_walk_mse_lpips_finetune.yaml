@@ -65,7 +65,7 @@ training:
   init_adapter_repo_id: Aaypom/vjepa21-cosmos-ci-predicted-1frame-75k-drive-walk-mse-adapter
   batch_size: 2
   gradient_accumulation_steps: 8
-  epochs: 2
+  epochs: 3
   learning_rate: 0.00005
   min_learning_rate: 0.000005
   scheduler: cosine

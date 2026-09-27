@@ -17,7 +17,7 @@ is selected on the full validation split's **predicted frame-15 RGB LPIPS**;
 latent MSE, RGB MSE, PSNR, persistence, and Cosmos self-reconstruction remain
 diagnostics. Do not select or tune on the test split.
 
-The default fine-tune is 2 epochs, batch 2, accumulation 8 (effective 16),
+The default fine-tune is 3 epochs, batch 2, accumulation 8 (effective 16),
 learning rate `5e-5` decaying to `5e-6`, and full validation at step 0,
 every 1,000 optimizer steps, and epoch end if needed. The separate W&B run
 receives stepwise raw/weighted losses, validation metrics, 20 preview videos
