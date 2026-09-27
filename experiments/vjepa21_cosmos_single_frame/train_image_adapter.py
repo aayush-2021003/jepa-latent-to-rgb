@@ -1,4 +1,4 @@
-"""Predicted-latent frame-15 adapter with latent and decoded-image supervision."""
+"""Predicted-latent frame-15 adapter with selectable latent/image supervision."""
 from __future__ import annotations
 
 import argparse
@@ -41,6 +41,12 @@ def make_perceptual_model(config: dict, device: torch.device):
 def objective(prediction, target_latent, target_rgb, decoder, perceptual, config):
     """RGB MSE is on [0,1]; LPIPS is on [-1,1]."""
     loss_cfg = config["loss"]
+    mode = loss_cfg.get("objective", "latent_l1_cosine_rgb_lpips")
+    if mode == "latent_mse":
+        latent_mse = F.mse_loss(prediction.float(), target_latent.float())
+        return latent_mse, {"latent_mse": latent_mse}
+    if mode != "latent_l1_cosine_rgb_lpips":
+        raise ValueError(f"Unsupported loss objective: {mode}")
     latent_loss, parts = latent_alignment_loss(
         prediction, target_latent,
         float(loss_cfg["latent_l1"]), float(loss_cfg["latent_cosine"]),
@@ -70,7 +76,7 @@ def image_metrics(decoded, target_rgb, perceptual):
 def evaluate(adapter, loader, decoder, perceptual, device, precision, static_metrics=None):
     adapter.eval()
     totals = {key: 0.0 for key in (
-        "predicted_latent_l1", "predicted_latent_cosine",
+        "predicted_latent_l1", "predicted_latent_cosine", "predicted_latent_mse",
         "predicted_rgb_mse", "predicted_rgb_psnr", "predicted_rgb_lpips",
         "persistence_rgb_mse", "persistence_rgb_psnr", "persistence_rgb_lpips",
         "cosmos_rgb_mse", "cosmos_rgb_psnr", "cosmos_rgb_lpips",
@@ -90,6 +96,7 @@ def evaluate(adapter, loader, decoder, perceptual, device, precision, static_met
         metrics = {
             "predicted_latent_l1": latent_parts["latent_l1"],
             "predicted_latent_cosine": latent_parts["latent_cosine"],
+            "predicted_latent_mse": F.mse_loss(predicted_latent.float(), target_latent.float()),
         }
         images = [("predicted", predicted_rgb)]
         if static_metrics is None:
@@ -130,12 +137,17 @@ def make_loader(config, split, shuffle):
     return dataset, loader
 
 
-def plot_curves(history, output):
+def plot_curves(history, output, selection_metric):
     if not history:
         return
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    axes[0].plot([r["epoch"] for r in history], [r["train_loss"] for r in history])
-    axes[0].set(xlabel="Epoch", ylabel="Train total loss")
+    epochs = [r["epoch"] for r in history]
+    axes[0].plot(epochs, [r["train_loss"] for r in history], label="Train loss")
+    selected_key = f"val_{selection_metric}"
+    if all(selected_key in row for row in history):
+        axes[0].plot(epochs, [row[selected_key] for row in history], label="Validation")
+    axes[0].set(xlabel="Epoch", ylabel=selection_metric)
+    axes[0].legend()
     axes[1].plot([r["epoch"] for r in history], [r["val_predicted_rgb_lpips"] for r in history], label="Predicted")
     axes[1].plot([r["epoch"] for r in history], [r["val_persistence_rgb_lpips"] for r in history], label="Persistence")
     axes[1].set(xlabel="Epoch", ylabel="Validation LPIPS")
@@ -156,8 +168,15 @@ def main():
     args = parser.parse_args()
     config = load_config(args.config)
     validate_model_geometry(config)
-    if config["training"]["input_latent"] != "predicted" or config["training"]["selection_metric"] != "predicted_rgb_lpips":
-        raise ValueError("Expected predicted JEPA input and LPIPS checkpoint selection")
+    if config["loss"].get("objective", "latent_l1_cosine_rgb_lpips") not in (
+        "latent_l1_cosine_rgb_lpips", "latent_mse"
+    ):
+        raise ValueError("Unknown loss objective")
+    selection_metric = config["training"]["selection_metric"]
+    if config["training"]["input_latent"] != "predicted" or selection_metric not in (
+        "predicted_rgb_lpips", "predicted_latent_mse"
+    ):
+        raise ValueError("Expected predicted JEPA input and a supported checkpoint metric")
     if int(config["data"].get("test_samples", 0)) < 1:
         raise ValueError("A disjoint test split is required")
     seed_everything(config["experiment"]["seed"])
@@ -191,6 +210,8 @@ def main():
     if run:
         run.define_metric("optimizer_step")
         run.define_metric("validation/*", step_metric="optimizer_step")
+        run.summary["checkpoint_selection_metric"] = selection_metric
+        run.summary["hf_model_repo"] = f"https://huggingface.co/{config['huggingface']['repo_id']}"
     history_path, validation_path = output / "history.json", output / "validation_history.json"
     history = json.loads(history_path.read_text()) if history_path.exists() else []
     validation_history = json.loads(validation_path.read_text()) if validation_path.exists() else []
@@ -213,15 +234,23 @@ def main():
         atomic_json_dump(validation_history, validation_path)
         media = render_previews(adapter, decoder, config, output) if config["tracking"]["log_validation_media"] else None
         log_validation(run, record, media)
-        improved = metrics["predicted_rgb_lpips"] < best_metric
+        improved = metrics[selection_metric] < best_metric
         if improved:
-            best_metric = metrics["predicted_rgb_lpips"]
-            save_checkpoint(best_path, adapter, optimizer, scheduler, epoch - 1, global_step,
+            best_metric = metrics[selection_metric]
+            save_checkpoint(best_path, adapter, optimizer, scheduler, max(0, epoch - 1), global_step,
                             optimizer_step, best_metric, config)
+            if run:
+                run.summary["best_validation_metric"] = best_metric
+                run.summary["best_optimizer_step"] = optimizer_step
             if not args.no_hf_push and config["huggingface"]["push_best"]:
-                push_checkpoint_to_hub(config, best_path, record, "best")
+                best_url = push_checkpoint_to_hub(config, best_path, record, "best")
+                if run:
+                    run.summary["hf_best_checkpoint"] = best_url
         adapter.train()
         return metrics
+
+    if not args.test_only and start_epoch == 0 and optimizer_step == 0:
+        check_validation(0, 0.0, "initial")
 
     for epoch in range(start_epoch, int(train_cfg["epochs"])) if not args.test_only else ():
         adapter.train()
@@ -264,30 +293,47 @@ def main():
         metrics = (last_metrics if last_validation == optimizer_step else
                    check_validation(epoch + 1, epoch + 1.0, "epoch_end"))
         history.append({"epoch": epoch + 1, "train_loss": loss_total / samples,
-                        "val_predicted_rgb_lpips": metrics["predicted_rgb_lpips"],
-                        "val_persistence_rgb_lpips": metrics["persistence_rgb_lpips"],
-                        "val_predicted_rgb_psnr": metrics["predicted_rgb_psnr"]})
+                        **{f"val_{key}": value for key, value in metrics.items()}})
         atomic_json_dump(history, history_path)
         save_checkpoint(latest_path, adapter, optimizer, scheduler, epoch, global_step,
                         optimizer_step, best_metric, config)
+        if config["huggingface"].get("push_every_epoch", False):
+            epoch_path = output / f"adapter_epoch_{epoch + 1:03d}.pt"
+            save_checkpoint(epoch_path, adapter, optimizer, scheduler, epoch, global_step,
+                            optimizer_step, best_metric, config)
+            if not args.no_hf_push:
+                epoch_record = {**history[-1], "optimizer_step": optimizer_step,
+                                "selection_metric": selection_metric,
+                                "best_validation_metric": best_metric}
+                epoch_url = push_checkpoint_to_hub(
+                    config, epoch_path, epoch_record, f"epoch_{epoch + 1:03d}"
+                )
+                if run:
+                    run.summary[f"hf_epoch_{epoch + 1:03d}"] = epoch_url
         if not args.no_hf_push and config["huggingface"]["push_latest"]:
-            push_checkpoint_to_hub(config, latest_path, history[-1], "latest")
+            latest_url = push_checkpoint_to_hub(config, latest_path, history[-1], "latest")
+            if run:
+                run.summary["hf_latest_checkpoint"] = latest_url
         if run:
-            run.log({"epoch/train_loss": loss_total / samples, "epoch/val_predicted_rgb_lpips": metrics["predicted_rgb_lpips"],
-                     "epoch/best_val_lpips": best_metric, "optimizer_step": optimizer_step}, step=global_step)
+            run.summary["last_completed_epoch"] = epoch + 1
+            run.log({"epoch/train_loss": loss_total / samples,
+                     **{f"epoch/val_{key}": value for key, value in metrics.items()},
+                     f"epoch/best_val_{selection_metric}": best_metric,
+                     "epoch/checkpoint_saved": epoch + 1,
+                     "optimizer_step": optimizer_step}, step=global_step)
 
     if not best_path.is_file():
         raise FileNotFoundError(f"Best checkpoint unavailable for final test: {best_path}")
     best = torch.load(best_path, map_location="cpu", weights_only=False)
     adapter.load_state_dict(best["adapter"])
     test_metrics = evaluate(adapter, test_loader, decoder, perceptual, device, precision)
-    test_report = {"checkpoint": str(best_path), "selected_on": "validation/predicted_rgb_lpips",
-                   "best_validation_lpips": float(best["best_metric"]), **test_metrics}
+    test_report = {"checkpoint": str(best_path), "selected_on": f"validation/{selection_metric}",
+                   "best_validation_metric": float(best["best_metric"]), **test_metrics}
     report_path = output / "test_metrics.json"
     atomic_json_dump(test_report, report_path)
     test_media = render_previews(adapter, decoder, config, output, split="test") if config["tracking"]["log_validation_media"] else []
     curves = output / "loss_curves.png"
-    plot_curves(history, curves)
+    plot_curves(history, curves, selection_metric)
     if run:
         import wandb
         payload = {f"test/{key}": value for key, value in test_metrics.items()}
@@ -295,7 +341,7 @@ def main():
         payload["training/loss_curves"] = wandb.Image(str(curves))
         run.log(payload, step=global_step)
         run.summary["test_predicted_rgb_lpips"] = test_metrics["predicted_rgb_lpips"]
-        log_file_artifact(run, "vjepa21-cosmos-ci-image-loss-10k-results", "results",
+        log_file_artifact(run, f"{config['experiment']['name']}-results", "results",
                           [history_path, validation_path, report_path, curves])
         run.finish()
     print(json.dumps(test_report, indent=2))

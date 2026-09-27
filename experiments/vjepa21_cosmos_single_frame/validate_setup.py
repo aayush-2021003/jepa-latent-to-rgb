@@ -17,6 +17,7 @@ from experiments.vjepa21_cosmos_single_frame.models import validate_model_geomet
 
 def dataset_status(config: dict) -> dict:
     report = validate_local_dataset(config)
+    allowed = set(config["data"].get("allowed_tour_types", []))
     if not int(config["data"].get("test_samples", 0)):
         return report
     root = project_path(config["data"]["local_root"])
@@ -29,7 +30,11 @@ def dataset_status(config: dict) -> dict:
         keys = json.loads(path.read_text())["clip_keys"]
         if len(keys) != int(config["data"][f"{split}_samples"]):
             raise RuntimeError(f"{split} clip count mismatch")
-        sources[split] = {key.split("/")[1][:11] for key in keys}
+        if allowed:
+            found = {key.split("/")[-3] for key in keys}
+            if not found <= allowed:
+                raise RuntimeError(f"{split} contains disallowed tour types: {sorted(found - allowed)}")
+        sources[split] = {key.split("/")[-2][:11] for key in keys}
         report[split] = {"samples": len(keys), "source_videos": len(sources[split])}
     if len(sources) == 3:
         for a, b in (("train", "val"), ("train", "test"), ("val", "test")):
@@ -93,6 +98,12 @@ def cache_status(config: dict, required: bool) -> dict:
             preview = torch.load(preview_path, map_location="cpu", weights_only=False)
             if not preview or any("context_rgb" not in sample for sample in preview):
                 raise RuntimeError("Validation preview cache lacks 14-frame RGB context")
+            if len(preview) < int(config["data"]["preview_samples"]):
+                raise RuntimeError(
+                    f"{split} preview cache has {len(preview)} clips, but the config "
+                    f"requests {config['data']['preview_samples']}; rebuild this "
+                    "evaluation cache before training."
+                )
         result[split] = manifest["samples"]
     return result
 
@@ -154,9 +165,13 @@ def main() -> None:
         "status": "ok",
         "task": "frames 1-14 -> predicted tubelet 15-16 -> Cosmos-CI latent of frame 15",
         "warning": "single-frame readout from a native two-frame V-JEPA prediction",
-        "training_loss": ("frame15 latent_l1 + 0.1 latent_cosine + RGB_MSE + 0.1 LPIPS"
-                          if float(config["loss"].get("rgb_mse", 0)) else
-                          "frame15 latent_l1 + 0.1 * frame15 latent_cosine"),
+        "training_loss": (
+            "frame15 latent MSE only"
+            if config["loss"].get("objective") == "latent_mse" else
+            "frame15 latent_l1 + 0.1 latent_cosine + RGB_MSE + 0.1 LPIPS"
+            if float(config["loss"].get("rgb_mse", 0)) else
+            "frame15 latent_l1 + 0.1 * frame15 latent_cosine"
+        ),
         "dependencies": dependencies,
         "assets": assets,
         "dataset": dataset_status(config),

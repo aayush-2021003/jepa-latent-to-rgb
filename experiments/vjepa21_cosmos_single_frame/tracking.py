@@ -38,6 +38,13 @@ def push_checkpoint_to_hub(
         commit_message=f"Update {alias} validation metrics",
     )
     card = checkpoint.parent / "README_huggingface.md"
+    if config["loss"].get("objective") == "latent_mse":
+        loss_description = "latent MSE only. "
+    else:
+        loss_description = (
+            f"latent L1 ({config['loss']['latent_l1']}) plus cosine ({config['loss']['latent_cosine']}), "
+            f"RGB MSE ({config['loss'].get('rgb_mse', 0)}) and LPIPS ({config['loss'].get('perceptual', 0)}). "
+        )
     card.write_text(
         "---\n"
         "library_name: pytorch\n"
@@ -47,8 +54,7 @@ def push_checkpoint_to_hub(
         "Frames 1-14 are observed. Frozen V-JEPA 2.1 predicts one joint tubelet "
         "covering frames 15-16. This adapter reads that predicted tubelet and maps "
         "it to the frozen Cosmos-CI8x8 latent of frame 15 only. Training uses "
-        f"latent L1 ({config['loss']['latent_l1']}) plus cosine ({config['loss']['latent_cosine']}), "
-        f"RGB MSE ({config['loss'].get('rgb_mse', 0)}) and LPIPS ({config['loss'].get('perceptual', 0)}). "
+        f"{loss_description}"
         "This is a single-frame readout, not a change "
         "to V-JEPA's native two-frame tubelet size. Upstream weights are excluded.\n\n"
         f"- V-JEPA checkpoint: `{config['vjepa21']['checkpoint_url']}`\n"

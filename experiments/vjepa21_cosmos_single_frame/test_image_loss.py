@@ -25,6 +25,24 @@ class ThreeWaySplitTest(unittest.TestCase):
 
 
 class ObjectiveTest(unittest.TestCase):
+    def test_latent_mse_is_the_only_training_term(self):
+        class NoDecode:
+            def decode(self, latent):
+                raise AssertionError("Latent-MSE training must not decode images")
+
+        adapter = torch.nn.Conv2d(1, 1, 1, bias=False)
+        features = torch.ones(2, 1, 4, 4)
+        target = torch.zeros(2, 1, 4, 4)
+        prediction = adapter(features)
+        loss, parts = objective(
+            prediction, target, None, NoDecode(), None,
+            {"loss": {"objective": "latent_mse"}},
+        )
+        self.assertEqual(set(parts), {"latent_mse"})
+        self.assertTrue(torch.allclose(loss, (prediction.float() - target.float()).square().mean()))
+        loss.backward()
+        self.assertGreater(float(adapter.weight.grad.abs().sum()), 0)
+
     def test_rgb_and_perceptual_terms_reach_adapter(self):
         class Decoder:
             def decode(self, latent):

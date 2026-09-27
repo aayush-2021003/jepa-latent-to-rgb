@@ -1,4 +1,4 @@
-"""Download an exact, source-disjoint 5K/10K subset from DenseWorld's TAR archive.
+"""Download an exact, source-disjoint subset from DenseWorld's TAR archive.
 
 The current public ``denseworld-115k`` repository is metadata-only. The original
 WebDataset files are in the gated ``denseworld-115k_archive`` repository. This
@@ -15,6 +15,7 @@ import math
 import random
 import tarfile
 from dataclasses import dataclass
+from collections import Counter
 from pathlib import Path
 
 from tqdm import tqdm
@@ -36,6 +37,11 @@ class Record:
     member_base: str
     clip_key: str
     source_group: str
+    tour_type: str = ""
+
+
+class InsufficientClipsError(RuntimeError):
+    """The scanned shards cannot yet supply the requested disjoint splits."""
 
 
 class RollingTarWriter:
@@ -92,7 +98,9 @@ def choose_spread_shards(files: list[str], count: int, seed: int) -> list[str]:
     return [files[index] for index in sorted(set(indices))]
 
 
-def scan_tar(remote_file: str, local_tar: Path) -> list[Record]:
+def scan_tar(
+    remote_file: str, local_tar: Path, allowed_tour_types: set[str] | None = None
+) -> list[Record]:
     records = []
     with tarfile.open(local_tar, "r") as archive:
         json_members = [member for member in archive.getmembers() if member.name.endswith(".json")]
@@ -105,6 +113,9 @@ def scan_tar(remote_file: str, local_tar: Path) -> list[Record]:
             if extracted is None:
                 continue
             metadata = json.loads(extracted.read())
+            tour_type = str(metadata.get("tour_type", "")).lower()
+            if allowed_tour_types is not None and tour_type not in allowed_tour_types:
+                continue
             clip_key = clip_key_from_metadata(metadata)
             video_id = str(metadata["video_id"])
             records.append(
@@ -114,6 +125,7 @@ def scan_tar(remote_file: str, local_tar: Path) -> list[Record]:
                     member_base=base,
                     clip_key=clip_key,
                     source_group=video_id[:11],
+                    tour_type=tour_type,
                 )
             )
     return records
@@ -141,7 +153,7 @@ def select_source_disjoint(
     rng.shuffle(validation_pool)
     rng.shuffle(train_pool)
     if len(validation_pool) < val_samples or len(train_pool) < train_samples:
-        raise RuntimeError(
+        raise InsufficientClipsError(
             "The selected remote shards do not contain enough source-disjoint clips. "
             "Increase data.download_margin_shards and retry."
         )
@@ -172,7 +184,7 @@ def select_three_way_source_disjoint(
     rng = random.Random(seed)
     rng.shuffle(groups)
     if len(groups) < 2 * eval_source_groups + 1:
-        raise RuntimeError("Too few distinct source videos; increase data.download_margin_shards")
+        raise InsufficientClipsError("Too few distinct source videos; increase data.download_margin_shards")
     reserved = {
         "val": groups[:eval_source_groups],
         "test": groups[eval_source_groups:2 * eval_source_groups],
@@ -190,13 +202,13 @@ def select_three_way_source_disjoint(
                 if queue and len(selected) < count:
                     selected.append(queue.pop())
         if len(selected) != count or len({row.source_group for row in selected}) < eval_source_groups:
-            raise RuntimeError(f"Insufficient {split} clips from reserved source videos; download more shards")
+            raise InsufficientClipsError(f"Insufficient {split} clips from reserved source videos; download more shards")
         result[split] = selected
     train_groups = set(groups[2 * eval_source_groups:])
     train_pool = [row for row in records if row.source_group in train_groups]
     rng.shuffle(train_pool)
     if len(train_pool) < train_samples:
-        raise RuntimeError(
+        raise InsufficientClipsError(
             f"Only {len(train_pool)} train clips remain after source-disjoint eval reservations; "
             "increase data.download_margin_shards"
         )
@@ -266,6 +278,13 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
     data_cfg = config["data"]
+    allowed_tour_types = data_cfg.get("allowed_tour_types")
+    if allowed_tour_types is not None:
+        if not isinstance(allowed_tour_types, list) or not allowed_tour_types:
+            raise ValueError("data.allowed_tour_types must be a non-empty list")
+        allowed_tour_types = {str(value).lower() for value in allowed_tour_types}
+        if not allowed_tour_types <= {"walking", "drive", "drone", "rain"}:
+            raise ValueError(f"Unknown DenseWorld tour types: {sorted(allowed_tour_types)}")
     token = require_secret("HF_TOKEN", aliases=("HF_ACCESS_TOKEN",))
 
     from huggingface_hub import HfApi, hf_hub_download
@@ -306,6 +325,11 @@ def main() -> None:
                 f"Existing dataset at {local_root} has train/val={found}, requested={expected}. "
                 "Use a new data.local_root to avoid mixing stale shards."
             )
+        if sorted(prepared.get("allowed_tour_types", [])) != sorted(allowed_tour_types or []):
+            raise RuntimeError(
+                f"Existing dataset at {local_root} uses different tour types; "
+                "use a new data.local_root."
+            )
         print(json.dumps(prepared, indent=2))
         return
     remote_cache = local_root / "_remote_cache"
@@ -314,7 +338,7 @@ def main() -> None:
     run = None if args.no_wandb else start_wandb(config, "dataset-preparation")
     records: list[Record] = []
     downloaded_paths: list[Path] = []
-    for remote_file in tqdm(selected_shards, desc="Downloading DenseWorld shards", unit="tar"):
+    def download_and_scan(remote_file: str) -> None:
         local_file = Path(
             hf_hub_download(
                 repo_id=data_cfg["archive_repo"],
@@ -325,23 +349,49 @@ def main() -> None:
             )
         )
         downloaded_paths.append(local_file)
-        records.extend(scan_tar(remote_file, local_file))
+        records.extend(scan_tar(remote_file, local_file, allowed_tour_types))
+
+    for remote_file in tqdm(selected_shards, desc="Downloading DenseWorld shards", unit="tar"):
+        download_and_scan(remote_file)
 
     clip_keys = [record.clip_key for record in records]
     if len(clip_keys) != len(set(clip_keys)):
         raise RuntimeError("Duplicate clip keys were found across the selected DenseWorld shards")
 
-    if test_samples:
-        splits = select_three_way_source_disjoint(
-            records, data_cfg["train_samples"], data_cfg["val_samples"],
-            test_samples, int(data_cfg["eval_source_groups"]), config["experiment"]["seed"],
-        )
-    else:
+    def select_splits() -> dict[str, list[Record]]:
+        if test_samples:
+            return select_three_way_source_disjoint(
+                records, data_cfg["train_samples"], data_cfg["val_samples"],
+                test_samples, int(data_cfg["eval_source_groups"]), config["experiment"]["seed"],
+            )
         train, validation = select_source_disjoint(
             records, data_cfg["train_samples"], data_cfg["val_samples"],
             config["experiment"]["seed"],
         )
-        splits = {"train": train, "val": validation}
+        return {"train": train, "val": validation}
+
+    try:
+        splits = select_splits()
+    except InsufficientClipsError:
+        already_selected = set(selected_shards)
+        remaining_shards = [name for name in remote_tars if name not in already_selected]
+        splits = None
+        for remote_file in tqdm(remaining_shards, desc="Backfilling DenseWorld shards", unit="tar"):
+            download_and_scan(remote_file)
+            selected_shards.append(remote_file)
+            splits = None
+            try:
+                splits = select_splits()
+            except InsufficientClipsError:
+                continue
+            break
+        if splits is None:
+            raise InsufficientClipsError(
+                "The full archive cannot supply the requested source-disjoint subset "
+                "after tour-type filtering. Reduce split counts or eval_source_groups."
+            )
+        if len(records) != len({record.clip_key for record in records}):
+            raise RuntimeError("Duplicate clip keys were found during shard backfill")
     roots = {split: local_root / split for split in splits}
     manifests = repack(
         splits,
@@ -350,9 +400,15 @@ def main() -> None:
     )
     summary = {
         "archive_repo": data_cfg["archive_repo"],
+        "allowed_tour_types": sorted(allowed_tour_types or []),
         "remote_shards_total": len(remote_tars),
         "remote_shards_downloaded": selected_shards,
         "candidates_scanned": len(records),
+        "candidate_tour_type_counts": dict(sorted(Counter(row.tour_type for row in records).items())),
+        "split_tour_type_counts": {
+            split: dict(sorted(Counter(row.tour_type for row in rows).items()))
+            for split, rows in splits.items()
+        },
         **manifests,
         "source_overlap": 0,
     }
@@ -366,6 +422,11 @@ def main() -> None:
                 "dataset/train_source_videos": manifests["train"]["source_videos"],
                 **{f"dataset/{split}_source_videos": manifest["source_videos"] for split, manifest in manifests.items()},
                 "dataset/source_overlap": 0,
+                **{
+                    f"dataset/{split}_{tour_type}_samples": count
+                    for split, counts in summary["split_tour_type_counts"].items()
+                    for tour_type, count in counts.items()
+                },
             }
         )
         log_file_artifact(run, "denseworld-subset-manifests", "dataset", [summary_path])
