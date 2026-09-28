@@ -86,7 +86,9 @@ tracking:
   run_name: vjepa21-1b-cosmos-ci-predicted-1frame-75k-linear-mse
   log_every_steps: 10
   log_validation_media: false
-  log_context_panel: false
+  # Keep test-cache metadata compatible with the original 75K cache.
+  # This does not enable validation or validation-media logging.
+  log_context_panel: true
   validation_media_fps: 4
 
 huggingface:

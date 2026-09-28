@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
-    echo "Usage: bash scripts/run_vjepa21_cosmos_single_frame.sh <validate|data|assets|cache|train|train-image|infer> <config> [extra args...]"
+    echo "Usage: bash scripts/run_vjepa21_cosmos_single_frame.sh <validate|data|assets|cache|train|train-image|infer|compare-test> <config> [extra args...]"
     exit 2
 fi
 
@@ -18,5 +18,6 @@ case "$STAGE" in
     train) python -m experiments.vjepa21_cosmos_single_frame.train_adapter --config "$CONFIG" "$@" ;;
     train-image) python -m experiments.vjepa21_cosmos_single_frame.train_image_adapter --config "$CONFIG" "$@" ;;
     infer) python -m experiments.vjepa21_cosmos_single_frame.infer --config "$CONFIG" "$@" ;;
+    compare-test) python -m experiments.vjepa21_cosmos_single_frame.compare_test --config "$CONFIG" "$@" ;;
     *) echo "Unknown stage: $STAGE"; exit 2 ;;
 esac

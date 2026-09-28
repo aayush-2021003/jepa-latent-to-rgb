@@ -1,0 +1,21 @@
+# Paired, fixed-seed test-only comparison; no checkpoint is selected on these clips.
+base_config: configs/experiments/vjepa21_cosmos_predicted_1frame_75k_linear_mse.yaml
+output_dir: outputs/vjepa21_cosmos_75k_test_compare_500
+sample_count: 500
+seed: 42
+panel_size: 256
+fps: 4
+wandb_run_name: vjepa21-75k-paired-test-500-four-readouts
+checkpoints:
+  linear:
+    config: configs/experiments/vjepa21_cosmos_predicted_1frame_75k_linear_mse.yaml
+    alias: latest
+  latent_mse:
+    config: configs/experiments/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse.yaml
+    alias: best
+  image_loss:
+    config: configs/experiments/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse_lpips_finetune.yaml
+    alias: best
+  vgg_image_loss:
+    config: configs/experiments/vjepa21_cosmos_predicted_1frame_75k_jepawms_rgb_lpips_latent_mse.yaml
+    alias: best

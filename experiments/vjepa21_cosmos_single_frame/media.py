@@ -154,3 +154,44 @@ def save_rgb(path: Path, image: torch.Tensor) -> None:
     if tensor.dtype != torch.uint8:
         tensor = ((tensor.float().clamp(-1, 1) + 1.0) * 127.5).round().to(torch.uint8)
     Image.fromarray(tensor.permute(1, 2, 0).numpy(), mode="RGB").save(path)
+
+
+def save_seven_panel_test_video(
+    path: Path,
+    context: torch.Tensor,
+    panels: list[torch.Tensor],
+    labels: list[str],
+    *,
+    panel_size: int = 256,
+    fps: int = 4,
+) -> None:
+    """Render 14 context frames beside six fixed frame-15 comparisons."""
+    if context.ndim != 4 or context.shape[0] != 14 or context.shape[1] != 3:
+        raise ValueError(f"Expected 14 RGB context frames, got {tuple(context.shape)}")
+    if len(panels) != 6 or len(labels) != 7:
+        raise ValueError("Seven-panel comparison needs six stills and seven labels")
+    if panel_size < 64 or panel_size % 16 or fps < 1:
+        raise ValueError("panel_size must be a multiple of 16 >= 64 and fps positive")
+    stills = [_to_image(item).resize((panel_size, panel_size), Image.Resampling.LANCZOS)
+              for item in panels]
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+    except OSError:
+        font = ImageFont.load_default()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # 7*256 by (256+32) is macroblock-aligned; write frames incrementally.
+    with imageio.get_writer(path, fps=fps, codec="libx264", quality=7) as writer:
+        for frame in context:
+            moving = _to_image(frame).resize((panel_size, panel_size), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGB", (7 * panel_size, panel_size + 32), (18, 18, 18))
+            draw = ImageDraw.Draw(canvas)
+            for index, (label, image) in enumerate(zip(labels, [moving, *stills])):
+                left = index * panel_size
+                canvas.paste(image, (left, 32))
+                box = draw.textbbox((0, 0), label, font=font)
+                draw.text((left + max(4, (panel_size - box[2] + box[0]) // 2),
+                           max(2, (32 - box[3] + box[1]) // 2 - box[1])),
+                          label, fill="white", font=font)
+                if index:
+                    draw.line((left, 0, left, canvas.height), fill="white", width=2)
+            writer.append_data(np.asarray(canvas))
