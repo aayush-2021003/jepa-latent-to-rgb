@@ -189,16 +189,27 @@ def make_loader(config, split, shuffle):
     return dataset, loader
 
 
-def plot_curves(history, output, selection_metric):
+def plot_curves(history, output, selection_metric, test_history=None):
     if not history:
         return
     if selection_metric == "final_epoch":
-        fig, axis = plt.subplots(figsize=(6, 4))
-        axis.plot([row["epoch"] for row in history],
-                  [row["train_loss"] for row in history], label="Train latent MSE")
-        axis.set(xlabel="Epoch", ylabel="Training objective")
-        axis.grid(alpha=0.25)
-        axis.legend()
+        has_test_history = bool(test_history)
+        fig, axes = plt.subplots(1, 2 if has_test_history else 1,
+                                 figsize=(10, 4) if has_test_history else (6, 4))
+        train_axis = axes[0] if has_test_history else axes
+        train_axis.plot([row["epoch"] for row in history],
+                        [row["train_loss"] for row in history], label="Train latent MSE")
+        train_axis.set(xlabel="Epoch", ylabel="Training objective")
+        train_axis.grid(alpha=0.25)
+        train_axis.legend()
+        if has_test_history:
+            test_axis = axes[1]
+            test_axis.plot([row["epoch"] for row in test_history],
+                           [row["metrics"]["predicted_rgb_lpips"] for row in test_history],
+                           label="Test LPIPS (diagnostic)")
+            test_axis.set(xlabel="Epoch", ylabel="Test LPIPS")
+            test_axis.grid(alpha=0.25)
+            test_axis.legend()
         fig.tight_layout()
         fig.savefig(output, dpi=160)
         plt.close(fig)
@@ -238,6 +249,7 @@ def main():
     train_cfg = config["training"]
     selection_metric = train_cfg["selection_metric"]
     run_validation = bool(train_cfg.get("run_validation", True))
+    test_every_epoch = bool(train_cfg.get("test_every_epoch", False))
     supported_metrics = (
         ("predicted_rgb_lpips", "predicted_latent_mse")
         if run_validation else ("final_epoch",)
@@ -246,6 +258,8 @@ def main():
         raise ValueError("Expected predicted JEPA input and a supported checkpoint metric")
     if not run_validation and config["loss"]["objective"] != "latent_mse":
         raise ValueError("No-validation final-epoch mode is supported for latent MSE only")
+    if test_every_epoch and (run_validation or selection_metric != "final_epoch"):
+        raise ValueError("Per-epoch test monitoring requires fixed final-epoch selection")
     if int(config["data"].get("test_samples", 0)) < 1:
         raise ValueError("A disjoint test split is required")
     seed_everything(config["experiment"]["seed"])
@@ -299,8 +313,13 @@ def main():
         run.define_metric("optimizer_step")
         if run_validation:
             run.define_metric("validation/*", step_metric="optimizer_step")
+        if test_every_epoch:
+            run.define_metric("epoch_test/*", step_metric="optimizer_step")
         run.summary["checkpoint_selection_metric"] = selection_metric
         run.summary["validation_enabled"] = run_validation
+        run.summary["test_monitored_every_epoch"] = test_every_epoch
+        if test_every_epoch:
+            run.summary["test_used_for_checkpoint_selection"] = False
         run.summary["training_lpips_backbone"] = training_backbone
         run.summary["evaluation_lpips_backbone"] = evaluation_backbone
         if any(config["huggingface"].get(key, False) for key in
@@ -312,16 +331,28 @@ def main():
             run.summary["initial_adapter_checkpoint"] = initialization["checkpoint"]
             run.summary["initial_adapter_optimizer_step"] = initialization["source_optimizer_step"]
     history_path, validation_path = output / "history.json", output / "validation_history.json"
+    test_history_path = output / "test_history.json"
     history = json.loads(history_path.read_text()) if history_path.exists() else []
     validation_history = (
         json.loads(validation_path.read_text())
         if run_validation and validation_path.exists() else []
     )
+    test_history = (
+        json.loads(test_history_path.read_text())
+        if test_every_epoch and test_history_path.exists() else []
+    )
+    if test_every_epoch and not args.test_only and start_epoch == 0 and test_history:
+        raise RuntimeError("Existing test history requires its matching resume checkpoint")
     interval = int(train_cfg.get("validate_every_optimizer_steps", 0))
     if run_validation and interval < 1:
         raise ValueError("validate_every_optimizer_steps must be positive")
 
     validation_static = None
+    test_static = (
+        {key: value for key, value in test_history[-1]["metrics"].items()
+         if key.startswith(("cosmos_", "persistence_"))}
+        if test_history else None
+    )
 
     def check_validation(epoch, fraction, trigger):
         nonlocal best_metric, validation_static
@@ -350,6 +381,45 @@ def main():
                     run.summary["hf_best_checkpoint"] = best_url
         adapter.train()
         return metrics
+
+    def log_epoch_test_record(record: dict) -> None:
+        if run:
+            run.log({"epoch_test/epoch": record["epoch"],
+                     "epoch_test/global_step": record["global_step"],
+                     **{f"epoch_test/{key}": value
+                        for key, value in record["metrics"].items()},
+                     "optimizer_step": record["optimizer_step"]})
+            run.summary["last_epoch_tested"] = record["epoch"]
+
+    def check_epoch_test(epoch_number: int, checkpoint_path: Path, trigger: str) -> dict:
+        nonlocal test_static
+        metrics = evaluate(adapter, test_loader, decoder, evaluation_perceptual,
+                           device, precision, static_metrics=test_static)
+        if test_static is None:
+            test_static = {key: value for key, value in metrics.items()
+                           if key.startswith(("cosmos_", "persistence_"))}
+        record = {"epoch": epoch_number, "global_step": global_step,
+                  "optimizer_step": optimizer_step, "checkpoint": str(checkpoint_path),
+                  "trigger": trigger, "diagnostic_only": True, "metrics": metrics}
+        test_history.append(record)
+        atomic_json_dump(test_history, test_history_path)
+        log_epoch_test_record(record)
+        return metrics
+
+    if test_every_epoch:
+        for previous_record in test_history:
+            log_epoch_test_record(previous_record)
+
+    if test_every_epoch and not args.test_only and start_epoch > 0:
+        last_record = test_history[-1] if test_history else None
+        if last_record and last_record["epoch"] >= start_epoch and (
+            last_record["epoch"], last_record["optimizer_step"]
+        ) != (start_epoch, optimizer_step):
+            raise RuntimeError("Per-epoch test history does not match the resume checkpoint")
+        if not last_record or (last_record["epoch"], last_record["optimizer_step"]) != (
+            start_epoch, optimizer_step
+        ):
+            check_epoch_test(start_epoch, latest_path, "resume_catchup")
 
     if run_validation and not args.test_only and start_epoch == 0 and optimizer_step == 0:
         check_validation(0, 0.0, "initial")
@@ -401,10 +471,11 @@ def main():
         atomic_json_dump(history, history_path)
         save_checkpoint(latest_path, adapter, optimizer, scheduler, epoch, global_step,
                         optimizer_step, best_metric, config)
-        if config["huggingface"].get("push_every_epoch", False):
-            epoch_path = output / f"adapter_epoch_{epoch + 1:03d}.pt"
+        epoch_path = output / f"adapter_epoch_{epoch + 1:03d}.pt"
+        if train_cfg.get("save_epoch_checkpoints", False) or config["huggingface"].get("push_every_epoch", False):
             save_checkpoint(epoch_path, adapter, optimizer, scheduler, epoch, global_step,
                             optimizer_step, best_metric, config)
+        if config["huggingface"].get("push_every_epoch", False):
             if not args.no_hf_push:
                 epoch_record = {**history[-1], "optimizer_step": optimizer_step,
                                 "selection_metric": selection_metric}
@@ -428,6 +499,9 @@ def main():
             if run_validation:
                 epoch_log[f"epoch/best_val_{selection_metric}"] = best_metric
             run.log(epoch_log, step=global_step)
+        if test_every_epoch:
+            check_epoch_test(epoch + 1, epoch_path if epoch_path.is_file() else latest_path,
+                             "epoch_end")
 
     selected_path = best_path if run_validation else latest_path
     if not selected_path.is_file():
@@ -439,7 +513,14 @@ def main():
     if not run_validation and int(selected["epoch"]) + 1 != int(train_cfg["epochs"]):
         raise RuntimeError("Final-epoch test requires all configured epochs to be complete")
     adapter.load_state_dict(selected["adapter"])
-    test_metrics = evaluate(adapter, test_loader, decoder, evaluation_perceptual, device, precision)
+    final_record = test_history[-1] if test_history else None
+    if (test_every_epoch and not args.test_only and final_record is not None
+            and (final_record["epoch"], final_record["optimizer_step"]) ==
+            (int(train_cfg["epochs"]), int(selected["optimizer_step"]))):
+        test_metrics = final_record["metrics"]
+    else:
+        test_metrics = evaluate(adapter, test_loader, decoder, evaluation_perceptual,
+                                device, precision, static_metrics=test_static)
     test_report = {"checkpoint": str(selected_path),
                    "selected_on": f"validation/{selection_metric}" if run_validation else "final_epoch",
                    **test_metrics}
@@ -449,17 +530,22 @@ def main():
     atomic_json_dump(test_report, report_path)
     test_media = render_previews(adapter, decoder, config, output, split="test") if config["tracking"]["log_validation_media"] else []
     curves = output / "loss_curves.png"
-    plot_curves(history, curves, selection_metric)
+    plot_curves(history, curves, selection_metric, test_history)
     if run:
         import wandb
         payload = {f"test/{key}": value for key, value in test_metrics.items()}
         payload.update({f"test/sample_{index:02d}": wandb.Video(str(path), format="mp4") for index, path in enumerate(test_media) if path.suffix == ".mp4"})
         payload["training/loss_curves"] = wandb.Image(str(curves))
-        run.log(payload, step=global_step)
+        if test_every_epoch:
+            run.log(payload)
+        else:
+            run.log(payload, step=global_step)
         run.summary["test_predicted_rgb_lpips"] = test_metrics["predicted_rgb_lpips"]
         result_files = [history_path, report_path, curves, output / "initialization.json"]
         if run_validation:
             result_files.append(validation_path)
+        if test_every_epoch:
+            result_files.append(test_history_path)
         log_file_artifact(run, f"{config['experiment']['name']}-results", "results",
                           result_files)
         run.finish()

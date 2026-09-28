@@ -61,6 +61,8 @@ training:
   input_latent: predicted
   selection_metric: final_epoch
   run_validation: false
+  test_every_epoch: true
+  save_epoch_checkpoints: true
   batch_size: 2
   gradient_accumulation_steps: 8
   epochs: 5
