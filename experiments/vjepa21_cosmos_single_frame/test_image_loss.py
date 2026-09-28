@@ -9,6 +9,7 @@ from copy import deepcopy
 import torch
 
 from experiments.jepa_cosmos.download_denseworld import Record, select_three_way_source_disjoint
+from experiments.vjepa21_cosmos_single_frame.adapter import build_adapter
 from experiments.vjepa21_cosmos_single_frame.train_image_adapter import (
     load_adapter_initialization, objective,
 )
@@ -31,6 +32,36 @@ class ThreeWaySplitTest(unittest.TestCase):
 
 
 class ObjectiveTest(unittest.TestCase):
+    def test_linear_readout_is_affine_and_has_expected_geometry(self):
+        config = {
+            "adapter": {"type": "linear", "input_dim": 4, "output_channels": 2},
+            "cosmos": {"latent_channels": 2},
+        }
+        adapter = build_adapter(config)
+        self.assertEqual(sum(parameter.numel() for parameter in adapter.parameters()), 10)
+        x = torch.randn(2, 4, 1, 3, 3, requires_grad=True)
+        y = torch.randn(2, 4, 1, 3, 3)
+        zero = torch.zeros_like(x)
+        self.assertEqual(tuple(adapter(x, (6, 6)).shape), (2, 2, 6, 6))
+        self.assertTrue(torch.allclose(
+            adapter(x + y, (6, 6)) - adapter(zero, (6, 6)),
+            adapter(x, (6, 6)) + adapter(y, (6, 6))
+            - 2 * adapter(zero, (6, 6)),
+            atol=1e-6,
+        ))
+        adapter(x, (6, 6)).square().mean().backward()
+        self.assertIsNotNone(adapter.projection.weight.grad)
+
+    def test_linear_baseline_reuses_75k_cache_and_split(self):
+        base = load_config("configs/experiments/vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse.yaml")
+        linear = load_config("configs/experiments/vjepa21_cosmos_predicted_1frame_75k_linear_mse.yaml")
+        for section in ("data", "vjepa21", "cosmos"):
+            self.assertEqual(linear[section], base[section])
+        self.assertEqual(linear["adapter"]["type"], "linear")
+        self.assertEqual(linear["loss"]["objective"], "latent_mse")
+        self.assertEqual(linear["training"], base["training"])
+        self.assertNotEqual(linear["experiment"]["output_dir"], base["experiment"]["output_dir"])
+
     def test_latent_mse_is_the_only_training_term(self):
         class NoDecode:
             def decode(self, latent):

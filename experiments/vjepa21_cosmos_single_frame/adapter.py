@@ -72,8 +72,41 @@ class VJEPA21ToCosmosImageAdapter(nn.Module):
         return self.output_projection(F.silu(self.output_norm(hidden)))
 
 
-def build_adapter(config: dict) -> VJEPA21ToCosmosImageAdapter:
+class LinearVJEPA21ToCosmosImageAdapter(nn.Module):
+    """Affine per-token readout followed by fixed bilinear upsampling.
+
+    There is no normalization, activation, or spatially learned convolution.
+    The map from predicted JEPA features to Cosmos latents is affine.
+    """
+
+    def __init__(self, input_dim: int, output_channels: int) -> None:
+        super().__init__()
+        self.input_dim = input_dim
+        self.projection = nn.Conv2d(input_dim, output_channels, kernel_size=1)
+
+    def forward(
+        self, features: torch.Tensor, target_shape: tuple[int, int]
+    ) -> torch.Tensor:
+        if features.ndim != 5 or features.shape[1] != self.input_dim or features.shape[2] != 1:
+            raise ValueError(
+                f"Expected (B,{self.input_dim},1,H,W), got {tuple(features.shape)}"
+            )
+        if len(target_shape) != 2:
+            raise ValueError(f"Expected a spatial target shape, got {target_shape}")
+        latent = self.projection(features[:, :, 0])
+        return F.interpolate(latent, size=target_shape, mode="bilinear", align_corners=False)
+
+
+def build_adapter(config: dict) -> VJEPA21ToCosmosImageAdapter | LinearVJEPA21ToCosmosImageAdapter:
     adapter = config["adapter"]
+    kind = adapter.get("type", "residual")
+    if kind == "linear":
+        return LinearVJEPA21ToCosmosImageAdapter(
+            input_dim=int(adapter["input_dim"]),
+            output_channels=int(config["cosmos"]["latent_channels"]),
+        )
+    if kind != "residual":
+        raise ValueError(f"Unsupported adapter type: {kind}")
     return VJEPA21ToCosmosImageAdapter(
         input_dim=int(adapter["input_dim"]),
         hidden_dim=int(adapter["hidden_dim"]),
