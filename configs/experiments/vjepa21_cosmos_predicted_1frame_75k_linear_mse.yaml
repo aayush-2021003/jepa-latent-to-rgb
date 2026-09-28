@@ -69,7 +69,7 @@ training:
   max_grad_norm: 1.0
   num_workers: 2
   mixed_precision: bfloat16
-  validate_every_optimizer_steps: 1000
+  validate_every_optimizer_steps: 3750
   resume: true
 
 loss:

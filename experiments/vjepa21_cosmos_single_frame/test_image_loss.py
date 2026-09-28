@@ -59,7 +59,10 @@ class ObjectiveTest(unittest.TestCase):
             self.assertEqual(linear[section], base[section])
         self.assertEqual(linear["adapter"]["type"], "linear")
         self.assertEqual(linear["loss"]["objective"], "latent_mse")
-        self.assertEqual(linear["training"], base["training"])
+        for key, value in base["training"].items():
+            if key != "validate_every_optimizer_steps":
+                self.assertEqual(linear["training"][key], value)
+        self.assertEqual(linear["training"]["validate_every_optimizer_steps"], 3750)
         self.assertNotEqual(linear["experiment"]["output_dir"], base["experiment"]["output_dir"])
 
     def test_latent_mse_is_the_only_training_term(self):

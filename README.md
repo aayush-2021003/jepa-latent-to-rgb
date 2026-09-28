@@ -230,7 +230,7 @@ epoch end unless already due for the image-loss trainer).
 | `vjepa21_cosmos_predicted_1frame_10k_latent_mse.yaml` | 9,000/500/500 | latent MSE only | 20; 2×8; 2e-4; 300 | `train-image` |
 | `vjepa21_cosmos_predicted_1frame_60k_drive_walk_mse.yaml` | 48,000/6,000/6,000 | walk/drive, latent MSE | 5; 2×8; 2e-4; 1,500 | `train-image` |
 | `vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse.yaml` | 60,000/7,500/7,500 | walk/drive, latent MSE | 5; 2×8; 2e-4; 1,000 | `train-image` |
-| `vjepa21_cosmos_predicted_1frame_75k_linear_mse.yaml` | same 75K split/cache | affine 1×1 linear readout, latent MSE | 5; 2×8; 2e-4; 1,000 | `train-image` |
+| `vjepa21_cosmos_predicted_1frame_75k_linear_mse.yaml` | same 75K split/cache | affine 1×1 linear readout, latent MSE | 5; 2×8; 2e-4; 3,750 | `train-image` |
 | `vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse_high_lr_continue.yaml` | same 75K split/cache | fresh 5-epoch adapter-weight warm start, latent MSE | 5; 2×8; 2e-4; 1,000 | `train-image` |
 | `vjepa21_cosmos_predicted_1frame_75k_drive_walk_mse_lpips_finetune.yaml` | same 75K split/cache | 1 latent MSE + 5 RGB MSE + 2 Alex-LPIPS | 3; 2×8; 5e-5; 1,000 | `train-image` |
 | `vjepa21_cosmos_predicted_1frame_75k_jepawms_rgb_lpips.yaml` | same 75K split/cache | 10 RGB MSE + VGG-LPIPS | 3; 2×8; 5e-5; 1,000 | `train-image` |

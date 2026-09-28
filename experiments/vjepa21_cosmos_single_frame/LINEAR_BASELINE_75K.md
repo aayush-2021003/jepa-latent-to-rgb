@@ -13,7 +13,11 @@ activation, or learned spatial filtering. It receives **predicted**, not
 true-future, JEPA features. Like the main latent-MSE run it trains for five
 epochs with batch size 2, accumulation 8, AdamW, a cosine learning-rate
 schedule starting at 2e-4, and latent MSE alone. The best checkpoint is
-selected on full validation latent MSE, never on the test split.
+selected on full validation latent MSE, never on the test split. To avoid
+23 expensive full-image validation passes for a small linear model, this
+config validates at step 0 and once per epoch (every 3,750 optimizer steps).
+The optimization budget is unchanged; checkpoint-selection frequency differs
+from the six-block run and should be disclosed if comparing procedures.
 
 On the existing Vast.ai instance, from the repository root with the working
 Python environment active:
