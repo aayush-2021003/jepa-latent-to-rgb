@@ -49,10 +49,15 @@ def dataset_status(config: dict) -> dict:
 
 def cache_status(config: dict, required: bool) -> dict:
     result = {}
-    split_counts = [("train", int(config["data"]["train_samples"])),
-                    ("val", int(config["data"]["val_samples"]))]
+    default_splits = ["train", "val"]
     if int(config["data"].get("test_samples", 0)):
-        split_counts.append(("test", int(config["data"]["test_samples"])))
+        default_splits.append("test")
+    required_splits = config["data"].get("cache_splits", default_splits)
+    if not required_splits or len(set(required_splits)) != len(required_splits):
+        raise ValueError("data.cache_splits must contain distinct split names")
+    if any(split not in default_splits for split in required_splits):
+        raise ValueError(f"Unsupported data.cache_splits: {required_splits}")
+    split_counts = [(split, int(config["data"][f"{split}_samples"])) for split in required_splits]
     for split, expected in split_counts:
         manifest_path = project_path(config["data"]["cache_root"]) / split / "manifest.json"
         if not manifest_path.is_file():

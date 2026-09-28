@@ -24,6 +24,7 @@ data:
   crop_size: 384
   preview_samples: 20
   cache_samples_per_shard: 16
+  cache_splits: [train, test]
   decode_workers: 8
 
 vjepa21:
@@ -58,7 +59,8 @@ adapter:
 
 training:
   input_latent: predicted
-  selection_metric: predicted_latent_mse
+  selection_metric: final_epoch
+  run_validation: false
   batch_size: 2
   gradient_accumulation_steps: 8
   epochs: 5
@@ -69,7 +71,7 @@ training:
   max_grad_norm: 1.0
   num_workers: 2
   mixed_precision: bfloat16
-  validate_every_optimizer_steps: 3750
+  validate_every_optimizer_steps: 0
   resume: true
 
 loss:

@@ -192,6 +192,17 @@ def make_loader(config, split, shuffle):
 def plot_curves(history, output, selection_metric):
     if not history:
         return
+    if selection_metric == "final_epoch":
+        fig, axis = plt.subplots(figsize=(6, 4))
+        axis.plot([row["epoch"] for row in history],
+                  [row["train_loss"] for row in history], label="Train latent MSE")
+        axis.set(xlabel="Epoch", ylabel="Training objective")
+        axis.grid(alpha=0.25)
+        axis.legend()
+        fig.tight_layout()
+        fig.savefig(output, dpi=160)
+        plt.close(fig)
+        return
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     epochs = [r["epoch"] for r in history]
     axes[0].plot(epochs, [r["train_loss"] for r in history], label="Train total loss")
@@ -224,20 +235,25 @@ def main():
         "latent_l1_cosine_rgb_lpips", "latent_mse", "latent_mse_rgb_lpips"
     ):
         raise ValueError("Unknown loss objective")
-    selection_metric = config["training"]["selection_metric"]
-    if config["training"]["input_latent"] != "predicted" or selection_metric not in (
-        "predicted_rgb_lpips", "predicted_latent_mse"
-    ):
+    train_cfg = config["training"]
+    selection_metric = train_cfg["selection_metric"]
+    run_validation = bool(train_cfg.get("run_validation", True))
+    supported_metrics = (
+        ("predicted_rgb_lpips", "predicted_latent_mse")
+        if run_validation else ("final_epoch",)
+    )
+    if train_cfg["input_latent"] != "predicted" or selection_metric not in supported_metrics:
         raise ValueError("Expected predicted JEPA input and a supported checkpoint metric")
+    if not run_validation and config["loss"]["objective"] != "latent_mse":
+        raise ValueError("No-validation final-epoch mode is supported for latent MSE only")
     if int(config["data"].get("test_samples", 0)) < 1:
         raise ValueError("A disjoint test split is required")
     seed_everything(config["experiment"]["seed"])
     device = require_cuda()
     output = project_path(config["experiment"]["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
-    train_cfg = config["training"]
     _, train_loader = make_loader(config, "train", True)
-    _, val_loader = make_loader(config, "val", False)
+    val_loader = make_loader(config, "val", False)[1] if run_validation else None
     _, test_loader = make_loader(config, "test", False)
     adapter = build_adapter(config).to(device)
     decoder = CosmosContinuousImageTokenizer(config, device, False, True)
@@ -254,7 +270,7 @@ def main():
     precision = dtype_from_name(train_cfg["mixed_precision"])
     best_path, latest_path = output / "adapter_best.pt", output / "adapter_latest.pt"
     start_epoch = global_step = optimizer_step = 0
-    best_metric = float("inf")
+    best_metric = float("inf") if run_validation else None
     initialization = None
     if train_cfg["resume"] and latest_path.is_file() and not args.test_only:
         checkpoint = torch.load(latest_path, map_location="cpu", weights_only=False)
@@ -264,7 +280,10 @@ def main():
         start_epoch = int(checkpoint["epoch"]) + 1
         global_step = int(checkpoint["global_step"])
         optimizer_step = int(checkpoint["optimizer_step"])
-        best_metric = float(checkpoint["best_metric"])
+        old_validation = bool(checkpoint["config"]["training"].get("run_validation", True))
+        if old_validation != run_validation:
+            raise ValueError("Cannot resume a checkpoint under a different validation protocol")
+        best_metric = float(checkpoint["best_metric"]) if run_validation else None
     elif not args.test_only and train_cfg.get("init_adapter_checkpoint"):
         if best_path.is_file() or latest_path.is_file():
             raise RuntimeError(
@@ -278,11 +297,15 @@ def main():
     run = None if args.no_wandb else start_wandb(config, "adapter-image-training", config["tracking"]["run_name"])
     if run:
         run.define_metric("optimizer_step")
-        run.define_metric("validation/*", step_metric="optimizer_step")
+        if run_validation:
+            run.define_metric("validation/*", step_metric="optimizer_step")
         run.summary["checkpoint_selection_metric"] = selection_metric
+        run.summary["validation_enabled"] = run_validation
         run.summary["training_lpips_backbone"] = training_backbone
         run.summary["evaluation_lpips_backbone"] = evaluation_backbone
-        run.summary["hf_model_repo"] = f"https://huggingface.co/{config['huggingface']['repo_id']}"
+        if any(config["huggingface"].get(key, False) for key in
+               ("push_best", "push_latest", "push_every_epoch")):
+            run.summary["hf_model_repo"] = f"https://huggingface.co/{config['huggingface']['repo_id']}"
         if train_cfg.get("init_adapter_repo_id"):
             run.summary["source_adapter_repo"] = f"https://huggingface.co/{train_cfg['init_adapter_repo_id']}"
         if initialization:
@@ -290,9 +313,12 @@ def main():
             run.summary["initial_adapter_optimizer_step"] = initialization["source_optimizer_step"]
     history_path, validation_path = output / "history.json", output / "validation_history.json"
     history = json.loads(history_path.read_text()) if history_path.exists() else []
-    validation_history = json.loads(validation_path.read_text()) if validation_path.exists() else []
-    interval = int(train_cfg["validate_every_optimizer_steps"])
-    if interval < 1:
+    validation_history = (
+        json.loads(validation_path.read_text())
+        if run_validation and validation_path.exists() else []
+    )
+    interval = int(train_cfg.get("validate_every_optimizer_steps", 0))
+    if run_validation and interval < 1:
         raise ValueError("validate_every_optimizer_steps must be positive")
 
     validation_static = None
@@ -325,7 +351,7 @@ def main():
         adapter.train()
         return metrics
 
-    if not args.test_only and start_epoch == 0 and optimizer_step == 0:
+    if run_validation and not args.test_only and start_epoch == 0 and optimizer_step == 0:
         check_validation(0, 0.0, "initial")
 
     for epoch in range(start_epoch, int(train_cfg["epochs"])) if not args.test_only else ():
@@ -358,7 +384,7 @@ def main():
                 optimizer.zero_grad(set_to_none=True)
                 scheduler.step()
                 optimizer_step += 1
-                if optimizer_step % interval == 0:
+                if run_validation and optimizer_step % interval == 0:
                     last_metrics = check_validation(epoch + 1, epoch + samples / len(train_loader.dataset), "optimizer_step")
                     last_validation = optimizer_step
             if run and global_step % int(config["tracking"]["log_every_steps"]) == 0:
@@ -366,8 +392,10 @@ def main():
                          "train/lr": optimizer.param_groups[0]["lr"], "optimizer_step": optimizer_step}, step=global_step)
         if samples != len(train_loader.dataset):
             raise RuntimeError(f"Epoch yielded {samples} clips; expected {len(train_loader.dataset)}")
-        metrics = (last_metrics if last_validation == optimizer_step else
-                   check_validation(epoch + 1, epoch + 1.0, "epoch_end"))
+        metrics = (
+            last_metrics if last_validation == optimizer_step else
+            check_validation(epoch + 1, epoch + 1.0, "epoch_end")
+        ) if run_validation else {}
         history.append({"epoch": epoch + 1, "train_loss": loss_total / samples,
                         **{f"val_{key}": value for key, value in metrics.items()}})
         atomic_json_dump(history, history_path)
@@ -379,8 +407,9 @@ def main():
                             optimizer_step, best_metric, config)
             if not args.no_hf_push:
                 epoch_record = {**history[-1], "optimizer_step": optimizer_step,
-                                "selection_metric": selection_metric,
-                                "best_validation_metric": best_metric}
+                                "selection_metric": selection_metric}
+                if run_validation:
+                    epoch_record["best_validation_metric"] = best_metric
                 epoch_url = push_checkpoint_to_hub(
                     config, epoch_path, epoch_record, f"epoch_{epoch + 1:03d}"
                 )
@@ -392,19 +421,30 @@ def main():
                 run.summary["hf_latest_checkpoint"] = latest_url
         if run:
             run.summary["last_completed_epoch"] = epoch + 1
-            run.log({"epoch/train_loss": loss_total / samples,
-                     **{f"epoch/val_{key}": value for key, value in metrics.items()},
-                     f"epoch/best_val_{selection_metric}": best_metric,
-                     "epoch/checkpoint_saved": epoch + 1,
-                     "optimizer_step": optimizer_step}, step=global_step)
+            epoch_log = {"epoch/train_loss": loss_total / samples,
+                         **{f"epoch/val_{key}": value for key, value in metrics.items()},
+                         "epoch/checkpoint_saved": epoch + 1,
+                         "optimizer_step": optimizer_step}
+            if run_validation:
+                epoch_log[f"epoch/best_val_{selection_metric}"] = best_metric
+            run.log(epoch_log, step=global_step)
 
-    if not best_path.is_file():
-        raise FileNotFoundError(f"Best checkpoint unavailable for final test: {best_path}")
-    best = torch.load(best_path, map_location="cpu", weights_only=False)
-    adapter.load_state_dict(best["adapter"])
+    selected_path = best_path if run_validation else latest_path
+    if not selected_path.is_file():
+        raise FileNotFoundError(f"Selected checkpoint unavailable for final test: {selected_path}")
+    selected = torch.load(selected_path, map_location="cpu", weights_only=False)
+    checkpoint_validation = bool(selected["config"]["training"].get("run_validation", True))
+    if checkpoint_validation != run_validation:
+        raise ValueError("Selected checkpoint uses a different validation protocol")
+    if not run_validation and int(selected["epoch"]) + 1 != int(train_cfg["epochs"]):
+        raise RuntimeError("Final-epoch test requires all configured epochs to be complete")
+    adapter.load_state_dict(selected["adapter"])
     test_metrics = evaluate(adapter, test_loader, decoder, evaluation_perceptual, device, precision)
-    test_report = {"checkpoint": str(best_path), "selected_on": f"validation/{selection_metric}",
-                   "best_validation_metric": float(best["best_metric"]), **test_metrics}
+    test_report = {"checkpoint": str(selected_path),
+                   "selected_on": f"validation/{selection_metric}" if run_validation else "final_epoch",
+                   **test_metrics}
+    if run_validation:
+        test_report["best_validation_metric"] = float(selected["best_metric"])
     report_path = output / "test_metrics.json"
     atomic_json_dump(test_report, report_path)
     test_media = render_previews(adapter, decoder, config, output, split="test") if config["tracking"]["log_validation_media"] else []
@@ -417,9 +457,11 @@ def main():
         payload["training/loss_curves"] = wandb.Image(str(curves))
         run.log(payload, step=global_step)
         run.summary["test_predicted_rgb_lpips"] = test_metrics["predicted_rgb_lpips"]
+        result_files = [history_path, report_path, curves, output / "initialization.json"]
+        if run_validation:
+            result_files.append(validation_path)
         log_file_artifact(run, f"{config['experiment']['name']}-results", "results",
-                          [history_path, validation_path, report_path, curves,
-                           output / "initialization.json"])
+                          result_files)
         run.finish()
     print(json.dumps(test_report, indent=2))
 

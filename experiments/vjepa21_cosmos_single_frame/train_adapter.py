@@ -79,7 +79,7 @@ def save_checkpoint(
     epoch: int,
     global_step: int,
     optimizer_step: int,
-    best_metric: float,
+    best_metric: float | None,
     config: dict,
 ) -> None:
     atomic_torch_save(

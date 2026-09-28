@@ -271,7 +271,16 @@ def main() -> None:
         )
     world = OfficialVJEPA21WorldModel(config, device)
     cosmos = CosmosContinuousImageTokenizer(config, device, True, False)
-    splits = (("train", "val", "test") if int(config["data"].get("test_samples", 0)) else ("train", "val")) if args.split == "all" else (args.split,)
+    default_splits = (
+        ("train", "val", "test")
+        if int(config["data"].get("test_samples", 0)) else ("train", "val")
+    )
+    configured_splits = tuple(config["data"].get("cache_splits", default_splits))
+    if not configured_splits or len(set(configured_splits)) != len(configured_splits):
+        raise ValueError("data.cache_splits must contain distinct split names")
+    if any(split not in default_splits for split in configured_splits):
+        raise ValueError(f"Unsupported data.cache_splits: {configured_splits}")
+    splits = configured_splits if args.split == "all" else (args.split,)
     for split in splits:
         prepare_split(split, config, world, cosmos, run)
     if run is not None:
